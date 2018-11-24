@@ -1,0 +1,3588 @@
+Index: README.md
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- README.md	(date 1511770070000)
++++ README.md	(date 1511770070000)
+@@ -0,0 +1,6 @@
++# facenet_distance
++用FaceNet模型计算两个人脸之间的距离
++
++根据论文FaceNet: A Unified Embedding for Face Recognition and Clustering的想法和模型，计算得出人脸图片的“距离”。
++
++具体可参看[我的博客](http://www.jianshu.com/p/b7ecddb77a5e)
+Index: get_embedding_distance.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- get_embedding_distance.py	(date 1541577872439)
++++ get_embedding_distance.py	(date 1541577872439)
+@@ -0,0 +1,48 @@
++# -*- coding: utf-8 -*-
++
++import tensorflow as tf
++import numpy as np
++import scipy.misc
++import cv2
++import facenet
++
++image_size = 200 #don't need equal to real image size, but this value should not small than this
++modeldir = 'E:\\研究生\\face\\20170512-110547\\20170512-110547.pb' #change to your model dir
++image_name1 = 'E:\\研究生\\face\\facenet 测试程序\\裁剪后图片\\1.jpg' #change to your image name
++image_name2 = 'E:\\研究生\\face\\facenet 测试程序\\裁剪后图片\\8.jpg' #change to your image name
++
++print('建立facenet embedding模型')
++tf.Graph().as_default()
++sess = tf.Session()
++
++facenet.load_model(modeldir)
++images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
++embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
++phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0")
++embedding_size = embeddings.get_shape()[1]
++
++print('facenet embedding模型建立完毕')
++
++scaled_reshape = []
++
++
++image1 = scipy.misc.imread(image_name1, mode='RGB')
++image1 = cv2.resize(image1, (image_size, image_size), interpolation=cv2.INTER_CUBIC)
++image1 = facenet.prewhiten(image1)
++scaled_reshape.append(image1.reshape(-1,image_size,image_size,3))
++emb_array1 = np.zeros((1, embedding_size))
++emb_array1[0, :] = sess.run(embeddings, feed_dict={images_placeholder: scaled_reshape[0], phase_train_placeholder: False })[0]
++
++image2 = scipy.misc.imread(image_name2, mode='RGB')
++image2 = cv2.resize(image2, (image_size, image_size), interpolation=cv2.INTER_CUBIC)
++image2 = facenet.prewhiten(image2)
++scaled_reshape.append(image2.reshape(-1,image_size,image_size,3))
++emb_array2 = np.zeros((1, embedding_size))
++emb_array2[0, :] = sess.run(embeddings, feed_dict={images_placeholder: scaled_reshape[1], phase_train_placeholder: False })[0]
++
++dist = np.sqrt(np.sum(np.square(emb_array1[0]-emb_array2[0])))
++#print("emb_array1")
++#print(emb_array1)
++#print("emb_array1[0]")
++#print(emb_array1[0])
++print("128维特征向量的欧氏距离：%f "%dist)
+\ No newline at end of file
+Index: vectors.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- vectors.py	(date 1541919612567)
++++ vectors.py	(date 1541919612567)
+@@ -0,0 +1,156 @@
++import os
++import tensorflow as tf
++import numpy as np
++import scipy.misc
++import cv2
++#import facenet
++from imutils import paths
++from tensorflow.python.platform import gfile
++import re
++
++
++
++def load_model(model):
++    # Check if the model is a model directory (containing a metagraph and a checkpoint file)
++    #  or if it is a protobuf file with a frozen graph
++    model_exp = os.path.expanduser(model)
++    if (os.path.isfile(model_exp)):
++        print('Model filename: %s' % model_exp)
++        with gfile.FastGFile(model_exp, 'rb') as f:
++            graph_def = tf.GraphDef()
++            graph_def.ParseFromString(f.read())
++            tf.import_graph_def(graph_def, name='')
++    else:
++        print('Model directory: %s' % model_exp)
++        meta_file, ckpt_file = get_model_filenames(model_exp)
++
++        print('Metagraph file: %s' % meta_file)
++        print('Checkpoint file: %s' % ckpt_file)
++
++        saver = tf.train.import_meta_graph(os.path.join(model_exp, meta_file))
++        saver.restore(tf.get_default_session(), os.path.join(model_exp, ckpt_file))
++
++def get_model_filenames(model_dir):
++    files = os.listdir(model_dir)
++    meta_files = [s for s in files if s.endswith('.meta')]
++    if len(meta_files)==0:
++        raise ValueError('No meta file found in the model directory (%s)' % model_dir)
++    elif len(meta_files)>1:
++        raise ValueError('There should not be more than one meta file in the model directory (%s)' % model_dir)
++    meta_file = meta_files[0]
++    meta_files = [s for s in files if '.ckpt' in s]
++    max_step = -1
++    for f in files:
++        step_str = re.match(r'(^model-[\w\- ]+.ckpt-(\d+))', f)
++        if step_str is not None and len(step_str.groups())>=2:
++            step = int(step_str.groups()[1])
++            if step > max_step:
++                max_step = step
++                ckpt_file = step_str.groups()[0]
++    return meta_file, ckpt_file
++
++
++
++
++import os
++def name_read(path):
++
++    name_list=[]
++    for (root, dirs, files) in os.walk(path):  #列出目录下的所有文件和文件名
++        for filename in files:
++            #print(os.path.join(root,filename))
++            pathload=str(os.path.join(root,filename))  #遍历的获取文件名
++            #print(pathload)
++            name_list.append(pathload)
++        print(name_list)
++    return name_list
++def vector(name_list):
++    image_vector=[]  #照片向量矩阵
++
++    for i in range(len(name_list)):
++        scaled_reshape = []
++        image1 = scipy.misc.imread(name_list[i], mode='RGB')
++        image1 = cv2.resize(image1, (image_size, image_size), interpolation=cv2.INTER_CUBIC)
++        image1 = facenet.prewhiten(image1)
++        scaled_reshape.append(image1.reshape(-1, image_size, image_size, 3))
++        emb_array1 = np.zeros((1, embedding_size))
++        emb_array1[0, :] = sess.run(embeddings, feed_dict={images_placeholder: scaled_reshape[0], phase_train_placeholder: False})[0]
++        #print(emb_array1)
++        image_vector.append(emb_array1)
++        if i%50 == 0:
++            print('已读取',i)
++       # sess.run(embeddings, feed_dict={images_placeholder: scaled_reshape[0], phase_train_placeholder: False})[0]
++    return image_vector
++
++def user_image_vector(image_path):
++
++    image_path=name_read(image_path)  #图片文件夹转图片路径
++    #print('11111',user_path_list)
++    image_vector_list=vector(image_path)    # 明星库向量矩阵
++    #print('222',user_vector[0].shape)
++    while 1:
++            print('请输入文件路径')
++            user_path = input()
++
++            if user_path == str(0):
++                break
++            else:
++
++                user_path_list = name_read(user_path)
++
++                name_vector = vector(user_path_list)
++
++                same_image = []  # 最终相似图片矩阵
++                for i in range(len(image_vector_list)):
++                    # print(i)
++                    dist = np.sqrt(np.sum(np.square(name_vector - image_vector_list[i])))  # 两张图像的欧氏距离
++                    same_image.append(dist)
++
++                max_location = sorted(enumerate(same_image), key=lambda x: x[1], reverse=False)  # 返回
++
++                for i in range(3):
++                    # print(max_location[i][0])    #反馈最小（最相似）的欧氏距离
++                    image_id = max_location[i][0]
++                    print('相似图片路径:', image_path[image_id])
++
++
++# def compute(user_vector,image_path):
++#
++#     image_path_list = name_read(image_path)
++#
++#     base_vector = vector(image_path_list)  # 明星库向量矩阵
++#
++#     same_image = []  # 最终相似图片矩阵
++#     for i in range(len(base_vector)):
++#         # print(i)
++#         dist = np.sqrt(np.sum(np.square(user_vector - base_vector[i])))  # 两张图像的欧氏距离
++#         same_image.append(dist)
++#
++#     max_location = sorted(enumerate(same_image), key=lambda x: x[1], reverse=False)  # 返回
++#
++#     for i in range(3):
++#         # print(max_location[i][0])    #反馈最小（最相似）的欧氏距离
++#         image_id = max_location[i][0]
++#         print('相似图片路径:', image_path_list[image_id])
++if __name__ == '__main__':
++
++
++    image_size = 200 #don't need equal to real image size, but this value should not small than this
++    modeldir = 'E:\\研究生\\face\\20170512-110547\\20170512-110547.pb' #change to your model dir
++
++    print('建立facenet embedding模型')
++    tf.Graph().as_default()
++    sess = tf.Session()
++
++    load_model(modeldir)
++    images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
++    embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
++    phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0")
++    embedding_size = embeddings.get_shape()[1]
++    print('facenet embedding模型建立完毕')
++
++    image_path=r'.\image_裁剪'
++
++    user_image_vector(image_path)
++
++
+Index: example.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- example.py	(date 1541577534044)
++++ example.py	(date 1541577534044)
+@@ -0,0 +1,19 @@
++from imutils import paths
++def get_imgPath(path):
++    imagePaths = sorted(list(paths.list_images(path)))
++    #print(imagePaths)
++    i = 0
++    for img_name in imagePaths:
++         print(img_name)
++
++         with open("path.txt", "a") as f:
++            i += 1
++            print(i)
++            #print(imagePaths)
++            f.write(img_name)
++            f.write('\n')
++    return imagePaths
++
++pathss = 'E:\\研究生\\face\\facenet 测试程序\\裁剪后图片'
++
++get_imgPath(pathss)
+\ No newline at end of file
+Index: pic test.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- pic test.py	(date 1541684801697)
++++ pic test.py	(date 1541684801697)
+@@ -0,0 +1,63 @@
++# # coding=utf-8
++import glob
++import os
++
++import shutil
++from PIL import  Image
++import cv2
++
++#
++# # print(glob.glob(r'D:\VideoPhotos\sign\*.jpg'))
++# path = r'C:\Users\sy\Desktop\user_image'
++# images = glob.glob(path + r"\*.jpg")
++# for img in images:
++#
++#     im = Image.open(img)
++# print(im.format, im.size, im.mode)
++# size = 1224, 1632
++# print(size)
++# name = os.path.join(path, img)
++# im.thumbnail(size)
++# im.save(name, 'JPEG')
++# print(im.format, im.size, im.mode)
++
++inputfile=r'C:\Users\sy\Desktop\user_input_image'
++outputfile=r'C:\Users\sy\Desktop\user_image'
++flag=1024*1024
++
++for img in os.listdir(inputfile):
++    file_fullname = inputfile + '/' + img
++    im = Image.open(file_fullname)
++    print(im.format, im.size, im.mode)
++    size_tmp = os.path.getsize(file_fullname)
++    (x,y)=im.size
++    if size_tmp > flag:
++        if x>1920:
++            x_s=1920
++            y_s=int(y*1920/x)
++            out = im.resize((x_s, y_s), Image.ANTIALIAS)
++            out.save(outputfile + '/' + img)
++            print(out.format, out.size, out.mode)
++
++        # if y>1920:
++        #     y_s=1920
++        #     x_s=int(x*1920/y)
++        #     out = im.resize((x_s,y_s), Image.ANTIALIAS)
++        #     out.save(outputfile + '/' + img)
++        #     print(out.format, out.size, out.mode)
++    else:
++        shutil.copy(inputfile+ '/'+img, outputfile+ '/'+img)
++#size_tmp =os.path.getsize(file_fullname)
++#flag=1024*1024
++#(x,y)=im.size
++
++#while size_tmp > flag and q > 0:
++
++#size=1920,1080
++#out=im.thumbnail(size)
++#size_tmp = os.path.getsize(outputfile)
++# out = im.resize((x_s,y_s),Image.ANTIALIAS)
++# print(out.format,out.size,out.mode)
++# out.save(outputfile+'/target.jpg')
++
++
+Index: detect_face.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- detect_face.py	(date 1508769444000)
++++ detect_face.py	(date 1508769444000)
+@@ -0,0 +1,778 @@
++""" Tensorflow implementation of the face detection / alignment algorithm found at
++https://github.com/kpzhang93/MTCNN_face_detection_alignment
++"""
++# MIT License
++# 
++# Copyright (c) 2016 David Sandberg
++# 
++# Permission is hereby granted, free of charge, to any person obtaining a copy
++# of this software and associated documentation files (the "Software"), to deal
++# in the Software without restriction, including without limitation the rights
++# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++# copies of the Software, and to permit persons to whom the Software is
++# furnished to do so, subject to the following conditions:
++# 
++# The above copyright notice and this permission notice shall be included in all
++# copies or substantial portions of the Software.
++# 
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++# SOFTWARE.
++
++from __future__ import absolute_import
++from __future__ import division
++from __future__ import print_function
++from six import string_types, iteritems
++
++import numpy as np
++import tensorflow as tf
++#from math import floor
++import cv2
++import os
++
++def layer(op):
++    '''Decorator for composable network layers.'''
++
++    def layer_decorated(self, *args, **kwargs):
++        # Automatically set a name if not provided.
++        name = kwargs.setdefault('name', self.get_unique_name(op.__name__))
++        # Figure out the layer inputs.
++        if len(self.terminals) == 0:
++            raise RuntimeError('No input variables found for layer %s.' % name)
++        elif len(self.terminals) == 1:
++            layer_input = self.terminals[0]
++        else:
++            layer_input = list(self.terminals)
++        # Perform the operation and get the output.
++        layer_output = op(self, layer_input, *args, **kwargs)
++        # Add to layer LUT.
++        self.layers[name] = layer_output
++        # This output is now the input for the next layer.
++        self.feed(layer_output)
++        # Return self for chained calls.
++        return self
++
++    return layer_decorated
++
++class Network(object):
++
++    def __init__(self, inputs, trainable=True):
++        # The input nodes for this network
++        self.inputs = inputs
++        # The current list of terminal nodes
++        self.terminals = []
++        # Mapping from layer names to layers
++        self.layers = dict(inputs)
++        # If true, the resulting variables are set as trainable
++        self.trainable = trainable
++
++        self.setup()
++
++    def setup(self):
++        '''Construct the network. '''
++        raise NotImplementedError('Must be implemented by the subclass.')
++
++    def load(self, data_path, session, ignore_missing=False):
++        '''Load network weights.
++        data_path: The path to the numpy-serialized network weights
++        session: The current TensorFlow session
++        ignore_missing: If true, serialized weights for missing layers are ignored.
++        '''
++        data_dict = np.load(data_path, encoding='latin1').item() #pylint: disable=no-member
++
++        for op_name in data_dict:
++            with tf.variable_scope(op_name, reuse=True):
++                for param_name, data in iteritems(data_dict[op_name]):
++                    try:
++                        var = tf.get_variable(param_name)
++                        session.run(var.assign(data))
++                    except ValueError:
++                        if not ignore_missing:
++                            raise
++
++    def feed(self, *args):
++        '''Set the input(s) for the next operation by replacing the terminal nodes.
++        The arguments can be either layer names or the actual layers.
++        '''
++        assert len(args) != 0
++        self.terminals = []
++        for fed_layer in args:
++            if isinstance(fed_layer, string_types):
++                try:
++                    fed_layer = self.layers[fed_layer]
++                except KeyError:
++                    raise KeyError('Unknown layer name fed: %s' % fed_layer)
++            self.terminals.append(fed_layer)
++        return self
++
++    def get_output(self):
++        '''Returns the current network output.'''
++        return self.terminals[-1]
++
++    def get_unique_name(self, prefix):
++        '''Returns an index-suffixed unique name for the given prefix.
++        This is used for auto-generating layer names based on the type-prefix.
++        '''
++        ident = sum(t.startswith(prefix) for t, _ in self.layers.items()) + 1
++        return '%s_%d' % (prefix, ident)
++
++    def make_var(self, name, shape):
++        '''Creates a new TensorFlow variable.'''
++        return tf.get_variable(name, shape, trainable=self.trainable)
++
++    def validate_padding(self, padding):
++        '''Verifies that the padding is one of the supported ones.'''
++        assert padding in ('SAME', 'VALID')
++
++    @layer
++    def conv(self,
++             inp,
++             k_h,
++             k_w,
++             c_o,
++             s_h,
++             s_w,
++             name,
++             relu=True,
++             padding='SAME',
++             group=1,
++             biased=True):
++        # Verify that the padding is acceptable
++        self.validate_padding(padding)
++        # Get the number of channels in the input
++        c_i = int(inp.get_shape()[-1])
++        # Verify that the grouping parameter is valid
++        assert c_i % group == 0
++        assert c_o % group == 0
++        # Convolution for a given input and kernel
++        convolve = lambda i, k: tf.nn.conv2d(i, k, [1, s_h, s_w, 1], padding=padding)
++        with tf.variable_scope(name) as scope:
++            kernel = self.make_var('weights', shape=[k_h, k_w, c_i // group, c_o])
++            # This is the common-case. Convolve the input without any further complications.
++            output = convolve(inp, kernel)
++            # Add the biases
++            if biased:
++                biases = self.make_var('biases', [c_o])
++                output = tf.nn.bias_add(output, biases)
++            if relu:
++                # ReLU non-linearity
++                output = tf.nn.relu(output, name=scope.name)
++            return output
++
++    @layer
++    def prelu(self, inp, name):
++        with tf.variable_scope(name):
++            i = int(inp.get_shape()[-1])
++            alpha = self.make_var('alpha', shape=(i,))
++            output = tf.nn.relu(inp) + tf.multiply(alpha, -tf.nn.relu(-inp))
++        return output
++
++    @layer
++    def max_pool(self, inp, k_h, k_w, s_h, s_w, name, padding='SAME'):
++        self.validate_padding(padding)
++        return tf.nn.max_pool(inp,
++                              ksize=[1, k_h, k_w, 1],
++                              strides=[1, s_h, s_w, 1],
++                              padding=padding,
++                              name=name)
++
++    @layer
++    def fc(self, inp, num_out, name, relu=True):
++        with tf.variable_scope(name):
++            input_shape = inp.get_shape()
++            if input_shape.ndims == 4:
++                # The input is spatial. Vectorize it first.
++                dim = 1
++                for d in input_shape[1:].as_list():
++                    dim *= int(d)
++                feed_in = tf.reshape(inp, [-1, dim])
++            else:
++                feed_in, dim = (inp, input_shape[-1].value)
++            weights = self.make_var('weights', shape=[dim, num_out])
++            biases = self.make_var('biases', [num_out])
++            op = tf.nn.relu_layer if relu else tf.nn.xw_plus_b
++            fc = op(feed_in, weights, biases, name=name)
++            return fc
++
++
++    """
++    Multi dimensional softmax,
++    refer to https://github.com/tensorflow/tensorflow/issues/210
++    compute softmax along the dimension of target
++    the native softmax only supports batch_size x dimension
++    """
++    @layer
++    def softmax(self, target, axis, name=None):
++        max_axis = tf.reduce_max(target, axis, keep_dims=True)
++        target_exp = tf.exp(target-max_axis)
++        normalize = tf.reduce_sum(target_exp, axis, keep_dims=True)
++        softmax = tf.div(target_exp, normalize, name)
++        return softmax
++    
++class PNet(Network):
++    def setup(self):
++        (self.feed('data') #pylint: disable=no-value-for-parameter, no-member
++             .conv(3, 3, 10, 1, 1, padding='VALID', relu=False, name='conv1')
++             .prelu(name='PReLU1')
++             .max_pool(2, 2, 2, 2, name='pool1')
++             .conv(3, 3, 16, 1, 1, padding='VALID', relu=False, name='conv2')
++             .prelu(name='PReLU2')
++             .conv(3, 3, 32, 1, 1, padding='VALID', relu=False, name='conv3')
++             .prelu(name='PReLU3')
++             .conv(1, 1, 2, 1, 1, relu=False, name='conv4-1')
++             .softmax(3,name='prob1'))
++
++        (self.feed('PReLU3') #pylint: disable=no-value-for-parameter
++             .conv(1, 1, 4, 1, 1, relu=False, name='conv4-2'))
++        
++class RNet(Network):
++    def setup(self):
++        (self.feed('data') #pylint: disable=no-value-for-parameter, no-member
++             .conv(3, 3, 28, 1, 1, padding='VALID', relu=False, name='conv1')
++             .prelu(name='prelu1')
++             .max_pool(3, 3, 2, 2, name='pool1')
++             .conv(3, 3, 48, 1, 1, padding='VALID', relu=False, name='conv2')
++             .prelu(name='prelu2')
++             .max_pool(3, 3, 2, 2, padding='VALID', name='pool2')
++             .conv(2, 2, 64, 1, 1, padding='VALID', relu=False, name='conv3')
++             .prelu(name='prelu3')
++             .fc(128, relu=False, name='conv4')
++             .prelu(name='prelu4')
++             .fc(2, relu=False, name='conv5-1')
++             .softmax(1,name='prob1'))
++
++        (self.feed('prelu4') #pylint: disable=no-value-for-parameter
++             .fc(4, relu=False, name='conv5-2'))
++
++class ONet(Network):
++    def setup(self):
++        (self.feed('data') #pylint: disable=no-value-for-parameter, no-member
++             .conv(3, 3, 32, 1, 1, padding='VALID', relu=False, name='conv1')
++             .prelu(name='prelu1')
++             .max_pool(3, 3, 2, 2, name='pool1')
++             .conv(3, 3, 64, 1, 1, padding='VALID', relu=False, name='conv2')
++             .prelu(name='prelu2')
++             .max_pool(3, 3, 2, 2, padding='VALID', name='pool2')
++             .conv(3, 3, 64, 1, 1, padding='VALID', relu=False, name='conv3')
++             .prelu(name='prelu3')
++             .max_pool(2, 2, 2, 2, name='pool3')
++             .conv(2, 2, 128, 1, 1, padding='VALID', relu=False, name='conv4')
++             .prelu(name='prelu4')
++             .fc(256, relu=False, name='conv5')
++             .prelu(name='prelu5')
++             .fc(2, relu=False, name='conv6-1')
++             .softmax(1, name='prob1'))
++
++        (self.feed('prelu5') #pylint: disable=no-value-for-parameter
++             .fc(4, relu=False, name='conv6-2'))
++
++        (self.feed('prelu5') #pylint: disable=no-value-for-parameter
++             .fc(10, relu=False, name='conv6-3'))
++
++def create_mtcnn(sess, model_path):
++    if not model_path:
++        model_path,_ = os.path.split(os.path.realpath(__file__))
++
++    with tf.variable_scope('pnet'):
++        data = tf.placeholder(tf.float32, (None,None,None,3), 'input')
++        pnet = PNet({'data':data})
++        pnet.load(os.path.join(model_path, 'det1.npy'), sess)
++    with tf.variable_scope('rnet'):
++        data = tf.placeholder(tf.float32, (None,24,24,3), 'input')
++        rnet = RNet({'data':data})
++        rnet.load(os.path.join(model_path, 'det2.npy'), sess)
++    with tf.variable_scope('onet'):
++        data = tf.placeholder(tf.float32, (None,48,48,3), 'input')
++        onet = ONet({'data':data})
++        onet.load(os.path.join(model_path, 'det3.npy'), sess)
++        
++    pnet_fun = lambda img : sess.run(('pnet/conv4-2/BiasAdd:0', 'pnet/prob1:0'), feed_dict={'pnet/input:0':img})
++    rnet_fun = lambda img : sess.run(('rnet/conv5-2/conv5-2:0', 'rnet/prob1:0'), feed_dict={'rnet/input:0':img})
++    onet_fun = lambda img : sess.run(('onet/conv6-2/conv6-2:0', 'onet/conv6-3/conv6-3:0', 'onet/prob1:0'), feed_dict={'onet/input:0':img})
++    return pnet_fun, rnet_fun, onet_fun
++
++def detect_face(img, minsize, pnet, rnet, onet, threshold, factor):
++    # im: input image
++    # minsize: minimum of faces' size
++    # pnet, rnet, onet: caffemodel
++    # threshold: threshold=[th1 th2 th3], th1-3 are three steps's threshold
++    # fastresize: resize img from last scale (using in high-resolution images) if fastresize==true
++    factor_count=0
++    total_boxes=np.empty((0,9))
++    points=np.empty(0)
++    h=img.shape[0]
++    w=img.shape[1]
++    minl=np.amin([h, w])
++    m=12.0/minsize
++    minl=minl*m
++    # creat scale pyramid
++    scales=[]
++    while minl>=12:
++        scales += [m*np.power(factor, factor_count)]
++        minl = minl*factor
++        factor_count += 1
++
++    # first stage
++    for j in range(len(scales)):
++        scale=scales[j]
++        hs=int(np.ceil(h*scale))
++        ws=int(np.ceil(w*scale))
++        im_data = imresample(img, (hs, ws))
++        im_data = (im_data-127.5)*0.0078125
++        img_x = np.expand_dims(im_data, 0)
++        img_y = np.transpose(img_x, (0,2,1,3))
++        out = pnet(img_y)
++        out0 = np.transpose(out[0], (0,2,1,3))
++        out1 = np.transpose(out[1], (0,2,1,3))
++        
++        boxes, _ = generateBoundingBox(out1[0,:,:,1].copy(), out0[0,:,:,:].copy(), scale, threshold[0])
++        
++        # inter-scale nms
++        pick = nms(boxes.copy(), 0.5, 'Union')
++        if boxes.size>0 and pick.size>0:
++            boxes = boxes[pick,:]
++            total_boxes = np.append(total_boxes, boxes, axis=0)
++
++    numbox = total_boxes.shape[0]
++    if numbox>0:
++        pick = nms(total_boxes.copy(), 0.7, 'Union')
++        total_boxes = total_boxes[pick,:]
++        regw = total_boxes[:,2]-total_boxes[:,0]
++        regh = total_boxes[:,3]-total_boxes[:,1]
++        qq1 = total_boxes[:,0]+total_boxes[:,5]*regw
++        qq2 = total_boxes[:,1]+total_boxes[:,6]*regh
++        qq3 = total_boxes[:,2]+total_boxes[:,7]*regw
++        qq4 = total_boxes[:,3]+total_boxes[:,8]*regh
++        total_boxes = np.transpose(np.vstack([qq1, qq2, qq3, qq4, total_boxes[:,4]]))
++        total_boxes = rerec(total_boxes.copy())
++        total_boxes[:,0:4] = np.fix(total_boxes[:,0:4]).astype(np.int32)
++        dy, edy, dx, edx, y, ey, x, ex, tmpw, tmph = pad(total_boxes.copy(), w, h)
++
++    numbox = total_boxes.shape[0]
++    if numbox>0:
++        # second stage
++        tempimg = np.zeros((24,24,3,numbox))
++        for k in range(0,numbox):
++            tmp = np.zeros((int(tmph[k]),int(tmpw[k]),3))
++            tmp[dy[k]-1:edy[k],dx[k]-1:edx[k],:] = img[y[k]-1:ey[k],x[k]-1:ex[k],:]
++            if tmp.shape[0]>0 and tmp.shape[1]>0 or tmp.shape[0]==0 and tmp.shape[1]==0:
++                tempimg[:,:,:,k] = imresample(tmp, (24, 24))
++            else:
++                return np.empty()
++        tempimg = (tempimg-127.5)*0.0078125
++        tempimg1 = np.transpose(tempimg, (3,1,0,2))
++        out = rnet(tempimg1)
++        out0 = np.transpose(out[0])
++        out1 = np.transpose(out[1])
++        score = out1[1,:]
++        ipass = np.where(score>threshold[1])
++        total_boxes = np.hstack([total_boxes[ipass[0],0:4].copy(), np.expand_dims(score[ipass].copy(),1)])
++        mv = out0[:,ipass[0]]
++        if total_boxes.shape[0]>0:
++            pick = nms(total_boxes, 0.7, 'Union')
++            total_boxes = total_boxes[pick,:]
++            total_boxes = bbreg(total_boxes.copy(), np.transpose(mv[:,pick]))
++            total_boxes = rerec(total_boxes.copy())
++
++    numbox = total_boxes.shape[0]
++    if numbox>0:
++        # third stage
++        total_boxes = np.fix(total_boxes).astype(np.int32)
++        dy, edy, dx, edx, y, ey, x, ex, tmpw, tmph = pad(total_boxes.copy(), w, h)
++        tempimg = np.zeros((48,48,3,numbox))
++        for k in range(0,numbox):
++            tmp = np.zeros((int(tmph[k]),int(tmpw[k]),3))
++            tmp[dy[k]-1:edy[k],dx[k]-1:edx[k],:] = img[y[k]-1:ey[k],x[k]-1:ex[k],:]
++            if tmp.shape[0]>0 and tmp.shape[1]>0 or tmp.shape[0]==0 and tmp.shape[1]==0:
++                tempimg[:,:,:,k] = imresample(tmp, (48, 48))
++            else:
++                return np.empty()
++        tempimg = (tempimg-127.5)*0.0078125
++        tempimg1 = np.transpose(tempimg, (3,1,0,2))
++        out = onet(tempimg1)
++        out0 = np.transpose(out[0])
++        out1 = np.transpose(out[1])
++        out2 = np.transpose(out[2])
++        score = out2[1,:]
++        points = out1
++        ipass = np.where(score>threshold[2])
++        points = points[:,ipass[0]]
++        total_boxes = np.hstack([total_boxes[ipass[0],0:4].copy(), np.expand_dims(score[ipass].copy(),1)])
++        mv = out0[:,ipass[0]]
++
++        w = total_boxes[:,2]-total_boxes[:,0]+1
++        h = total_boxes[:,3]-total_boxes[:,1]+1
++        points[0:5,:] = np.tile(w,(5, 1))*points[0:5,:] + np.tile(total_boxes[:,0],(5, 1))-1
++        points[5:10,:] = np.tile(h,(5, 1))*points[5:10,:] + np.tile(total_boxes[:,1],(5, 1))-1
++        if total_boxes.shape[0]>0:
++            total_boxes = bbreg(total_boxes.copy(), np.transpose(mv))
++            pick = nms(total_boxes.copy(), 0.7, 'Min')
++            total_boxes = total_boxes[pick,:]
++            points = points[:,pick]
++                
++    return total_boxes, points
++
++
++def bulk_detect_face(images, detection_window_size_ratio, pnet, rnet, onet, threshold, factor):
++    # im: input image
++    # minsize: minimum of faces' size
++    # pnet, rnet, onet: caffemodel
++    # threshold: threshold=[th1 th2 th3], th1-3 are three steps's threshold [0-1]
++
++    all_scales = [None] * len(images)
++    images_with_boxes = [None] * len(images)
++
++    for i in range(len(images)):
++        images_with_boxes[i] = {'total_boxes': np.empty((0, 9))}
++
++    # create scale pyramid
++    for index, img in enumerate(images):
++        all_scales[index] = []
++        h = img.shape[0]
++        w = img.shape[1]
++        minsize = int(detection_window_size_ratio * np.minimum(w, h))
++        factor_count = 0
++        minl = np.amin([h, w])
++        if minsize <= 12:
++            minsize = 12
++
++        m = 12.0 / minsize
++        minl = minl * m
++        while minl >= 12:
++            all_scales[index].append(m * np.power(factor, factor_count))
++            minl = minl * factor
++            factor_count += 1
++
++    # # # # # # # # # # # # #
++    # first stage - fast proposal network (pnet) to obtain face candidates
++    # # # # # # # # # # # # #
++
++    images_obj_per_resolution = {}
++
++    # TODO: use some type of rounding to number module 8 to increase probability that pyramid images will have the same resolution across input images
++
++    for index, scales in enumerate(all_scales):
++        h = images[index].shape[0]
++        w = images[index].shape[1]
++
++        for scale in scales:
++            hs = int(np.ceil(h * scale))
++            ws = int(np.ceil(w * scale))
++
++            if (ws, hs) not in images_obj_per_resolution:
++                images_obj_per_resolution[(ws, hs)] = []
++
++            im_data = imresample(images[index], (hs, ws))
++            im_data = (im_data - 127.5) * 0.0078125
++            img_y = np.transpose(im_data, (1, 0, 2))  # caffe uses different dimensions ordering
++            images_obj_per_resolution[(ws, hs)].append({'scale': scale, 'image': img_y, 'index': index})
++
++    for resolution in images_obj_per_resolution:
++        images_per_resolution = [i['image'] for i in images_obj_per_resolution[resolution]]
++        outs = pnet(images_per_resolution)
++
++        for index in range(len(outs[0])):
++            scale = images_obj_per_resolution[resolution][index]['scale']
++            image_index = images_obj_per_resolution[resolution][index]['index']
++            out0 = np.transpose(outs[0][index], (1, 0, 2))
++            out1 = np.transpose(outs[1][index], (1, 0, 2))
++
++            boxes, _ = generateBoundingBox(out1[:, :, 1].copy(), out0[:, :, :].copy(), scale, threshold[0])
++
++            # inter-scale nms
++            pick = nms(boxes.copy(), 0.5, 'Union')
++            if boxes.size > 0 and pick.size > 0:
++                boxes = boxes[pick, :]
++                images_with_boxes[image_index]['total_boxes'] = np.append(images_with_boxes[image_index]['total_boxes'],
++                                                                          boxes,
++                                                                          axis=0)
++
++    for index, image_obj in enumerate(images_with_boxes):
++        numbox = image_obj['total_boxes'].shape[0]
++        if numbox > 0:
++            h = images[index].shape[0]
++            w = images[index].shape[1]
++            pick = nms(image_obj['total_boxes'].copy(), 0.7, 'Union')
++            image_obj['total_boxes'] = image_obj['total_boxes'][pick, :]
++            regw = image_obj['total_boxes'][:, 2] - image_obj['total_boxes'][:, 0]
++            regh = image_obj['total_boxes'][:, 3] - image_obj['total_boxes'][:, 1]
++            qq1 = image_obj['total_boxes'][:, 0] + image_obj['total_boxes'][:, 5] * regw
++            qq2 = image_obj['total_boxes'][:, 1] + image_obj['total_boxes'][:, 6] * regh
++            qq3 = image_obj['total_boxes'][:, 2] + image_obj['total_boxes'][:, 7] * regw
++            qq4 = image_obj['total_boxes'][:, 3] + image_obj['total_boxes'][:, 8] * regh
++            image_obj['total_boxes'] = np.transpose(np.vstack([qq1, qq2, qq3, qq4, image_obj['total_boxes'][:, 4]]))
++            image_obj['total_boxes'] = rerec(image_obj['total_boxes'].copy())
++            image_obj['total_boxes'][:, 0:4] = np.fix(image_obj['total_boxes'][:, 0:4]).astype(np.int32)
++            dy, edy, dx, edx, y, ey, x, ex, tmpw, tmph = pad(image_obj['total_boxes'].copy(), w, h)
++
++            numbox = image_obj['total_boxes'].shape[0]
++            tempimg = np.zeros((24, 24, 3, numbox))
++
++            if numbox > 0:
++                for k in range(0, numbox):
++                    tmp = np.zeros((int(tmph[k]), int(tmpw[k]), 3))
++                    tmp[dy[k] - 1:edy[k], dx[k] - 1:edx[k], :] = images[index][y[k] - 1:ey[k], x[k] - 1:ex[k], :]
++                    if tmp.shape[0] > 0 and tmp.shape[1] > 0 or tmp.shape[0] == 0 and tmp.shape[1] == 0:
++                        tempimg[:, :, :, k] = imresample(tmp, (24, 24))
++                    else:
++                        return np.empty()
++
++                tempimg = (tempimg - 127.5) * 0.0078125
++                image_obj['rnet_input'] = np.transpose(tempimg, (3, 1, 0, 2))
++
++    # # # # # # # # # # # # #
++    # second stage - refinement of face candidates with rnet
++    # # # # # # # # # # # # #
++
++    bulk_rnet_input = np.empty((0, 24, 24, 3))
++    for index, image_obj in enumerate(images_with_boxes):
++        if 'rnet_input' in image_obj:
++            bulk_rnet_input = np.append(bulk_rnet_input, image_obj['rnet_input'], axis=0)
++
++    out = rnet(bulk_rnet_input)
++    out0 = np.transpose(out[0])
++    out1 = np.transpose(out[1])
++    score = out1[1, :]
++
++    i = 0
++    for index, image_obj in enumerate(images_with_boxes):
++        if 'rnet_input' not in image_obj:
++            continue
++
++        rnet_input_count = image_obj['rnet_input'].shape[0]
++        score_per_image = score[i:i + rnet_input_count]
++        out0_per_image = out0[:, i:i + rnet_input_count]
++
++        ipass = np.where(score_per_image > threshold[1])
++        image_obj['total_boxes'] = np.hstack([image_obj['total_boxes'][ipass[0], 0:4].copy(),
++                                              np.expand_dims(score_per_image[ipass].copy(), 1)])
++
++        mv = out0_per_image[:, ipass[0]]
++
++        if image_obj['total_boxes'].shape[0] > 0:
++            h = images[index].shape[0]
++            w = images[index].shape[1]
++            pick = nms(image_obj['total_boxes'], 0.7, 'Union')
++            image_obj['total_boxes'] = image_obj['total_boxes'][pick, :]
++            image_obj['total_boxes'] = bbreg(image_obj['total_boxes'].copy(), np.transpose(mv[:, pick]))
++            image_obj['total_boxes'] = rerec(image_obj['total_boxes'].copy())
++
++            numbox = image_obj['total_boxes'].shape[0]
++
++            if numbox > 0:
++                tempimg = np.zeros((48, 48, 3, numbox))
++                image_obj['total_boxes'] = np.fix(image_obj['total_boxes']).astype(np.int32)
++                dy, edy, dx, edx, y, ey, x, ex, tmpw, tmph = pad(image_obj['total_boxes'].copy(), w, h)
++
++                for k in range(0, numbox):
++                    tmp = np.zeros((int(tmph[k]), int(tmpw[k]), 3))
++                    tmp[dy[k] - 1:edy[k], dx[k] - 1:edx[k], :] = images[index][y[k] - 1:ey[k], x[k] - 1:ex[k], :]
++                    if tmp.shape[0] > 0 and tmp.shape[1] > 0 or tmp.shape[0] == 0 and tmp.shape[1] == 0:
++                        tempimg[:, :, :, k] = imresample(tmp, (48, 48))
++                    else:
++                        return np.empty()
++                tempimg = (tempimg - 127.5) * 0.0078125
++                image_obj['onet_input'] = np.transpose(tempimg, (3, 1, 0, 2))
++
++        i += rnet_input_count
++
++    # # # # # # # # # # # # #
++    # third stage - further refinement and facial landmarks positions with onet
++    # # # # # # # # # # # # #
++
++    bulk_onet_input = np.empty((0, 48, 48, 3))
++    for index, image_obj in enumerate(images_with_boxes):
++        if 'onet_input' in image_obj:
++            bulk_onet_input = np.append(bulk_onet_input, image_obj['onet_input'], axis=0)
++
++    out = onet(bulk_onet_input)
++
++    out0 = np.transpose(out[0])
++    out1 = np.transpose(out[1])
++    out2 = np.transpose(out[2])
++    score = out2[1, :]
++    points = out1
++
++    i = 0
++    ret = []
++    for index, image_obj in enumerate(images_with_boxes):
++        if 'onet_input' not in image_obj:
++            ret.append(None)
++            continue
++
++        onet_input_count = image_obj['onet_input'].shape[0]
++
++        out0_per_image = out0[:, i:i + onet_input_count]
++        score_per_image = score[i:i + onet_input_count]
++        points_per_image = points[:, i:i + onet_input_count]
++
++        ipass = np.where(score_per_image > threshold[2])
++        points_per_image = points_per_image[:, ipass[0]]
++
++        image_obj['total_boxes'] = np.hstack([image_obj['total_boxes'][ipass[0], 0:4].copy(),
++                                              np.expand_dims(score_per_image[ipass].copy(), 1)])
++        mv = out0_per_image[:, ipass[0]]
++
++        w = image_obj['total_boxes'][:, 2] - image_obj['total_boxes'][:, 0] + 1
++        h = image_obj['total_boxes'][:, 3] - image_obj['total_boxes'][:, 1] + 1
++        points_per_image[0:5, :] = np.tile(w, (5, 1)) * points_per_image[0:5, :] + np.tile(
++            image_obj['total_boxes'][:, 0], (5, 1)) - 1
++        points_per_image[5:10, :] = np.tile(h, (5, 1)) * points_per_image[5:10, :] + np.tile(
++            image_obj['total_boxes'][:, 1], (5, 1)) - 1
++
++        if image_obj['total_boxes'].shape[0] > 0:
++            image_obj['total_boxes'] = bbreg(image_obj['total_boxes'].copy(), np.transpose(mv))
++            pick = nms(image_obj['total_boxes'].copy(), 0.7, 'Min')
++            image_obj['total_boxes'] = image_obj['total_boxes'][pick, :]
++            points_per_image = points_per_image[:, pick]
++
++            ret.append((image_obj['total_boxes'], points_per_image))
++        else:
++            ret.append(None)
++
++        i += onet_input_count
++
++    return ret
++
++
++# function [boundingbox] = bbreg(boundingbox,reg)
++def bbreg(boundingbox,reg):
++    # calibrate bounding boxes
++    if reg.shape[1]==1:
++        reg = np.reshape(reg, (reg.shape[2], reg.shape[3]))
++
++    w = boundingbox[:,2]-boundingbox[:,0]+1
++    h = boundingbox[:,3]-boundingbox[:,1]+1
++    b1 = boundingbox[:,0]+reg[:,0]*w
++    b2 = boundingbox[:,1]+reg[:,1]*h
++    b3 = boundingbox[:,2]+reg[:,2]*w
++    b4 = boundingbox[:,3]+reg[:,3]*h
++    boundingbox[:,0:4] = np.transpose(np.vstack([b1, b2, b3, b4 ]))
++    return boundingbox
++ 
++def generateBoundingBox(imap, reg, scale, t):
++    # use heatmap to generate bounding boxes
++    stride=2
++    cellsize=12
++
++    imap = np.transpose(imap)
++    dx1 = np.transpose(reg[:,:,0])
++    dy1 = np.transpose(reg[:,:,1])
++    dx2 = np.transpose(reg[:,:,2])
++    dy2 = np.transpose(reg[:,:,3])
++    y, x = np.where(imap >= t)
++    if y.shape[0]==1:
++        dx1 = np.flipud(dx1)
++        dy1 = np.flipud(dy1)
++        dx2 = np.flipud(dx2)
++        dy2 = np.flipud(dy2)
++    score = imap[(y,x)]
++    reg = np.transpose(np.vstack([ dx1[(y,x)], dy1[(y,x)], dx2[(y,x)], dy2[(y,x)] ]))
++    if reg.size==0:
++        reg = np.empty((0,3))
++    bb = np.transpose(np.vstack([y,x]))
++    q1 = np.fix((stride*bb+1)/scale)
++    q2 = np.fix((stride*bb+cellsize-1+1)/scale)
++    boundingbox = np.hstack([q1, q2, np.expand_dims(score,1), reg])
++    return boundingbox, reg
++ 
++# function pick = nms(boxes,threshold,type)
++def nms(boxes, threshold, method):
++    if boxes.size==0:
++        return np.empty((0,3))
++    x1 = boxes[:,0]
++    y1 = boxes[:,1]
++    x2 = boxes[:,2]
++    y2 = boxes[:,3]
++    s = boxes[:,4]
++    area = (x2-x1+1) * (y2-y1+1)
++    I = np.argsort(s)
++    pick = np.zeros_like(s, dtype=np.int16)
++    counter = 0
++    while I.size>0:
++        i = I[-1]
++        pick[counter] = i
++        counter += 1
++        idx = I[0:-1]
++        xx1 = np.maximum(x1[i], x1[idx])
++        yy1 = np.maximum(y1[i], y1[idx])
++        xx2 = np.minimum(x2[i], x2[idx])
++        yy2 = np.minimum(y2[i], y2[idx])
++        w = np.maximum(0.0, xx2-xx1+1)
++        h = np.maximum(0.0, yy2-yy1+1)
++        inter = w * h
++        if method is 'Min':
++            o = inter / np.minimum(area[i], area[idx])
++        else:
++            o = inter / (area[i] + area[idx] - inter)
++        I = I[np.where(o<=threshold)]
++    pick = pick[0:counter]
++    return pick
++
++# function [dy edy dx edx y ey x ex tmpw tmph] = pad(total_boxes,w,h)
++def pad(total_boxes, w, h):
++    # compute the padding coordinates (pad the bounding boxes to square)
++    tmpw = (total_boxes[:,2]-total_boxes[:,0]+1).astype(np.int32)
++    tmph = (total_boxes[:,3]-total_boxes[:,1]+1).astype(np.int32)
++    numbox = total_boxes.shape[0]
++
++    dx = np.ones((numbox), dtype=np.int32)
++    dy = np.ones((numbox), dtype=np.int32)
++    edx = tmpw.copy().astype(np.int32)
++    edy = tmph.copy().astype(np.int32)
++
++    x = total_boxes[:,0].copy().astype(np.int32)
++    y = total_boxes[:,1].copy().astype(np.int32)
++    ex = total_boxes[:,2].copy().astype(np.int32)
++    ey = total_boxes[:,3].copy().astype(np.int32)
++
++    tmp = np.where(ex>w)
++    edx.flat[tmp] = np.expand_dims(-ex[tmp]+w+tmpw[tmp],1)
++    ex[tmp] = w
++    
++    tmp = np.where(ey>h)
++    edy.flat[tmp] = np.expand_dims(-ey[tmp]+h+tmph[tmp],1)
++    ey[tmp] = h
++
++    tmp = np.where(x<1)
++    dx.flat[tmp] = np.expand_dims(2-x[tmp],1)
++    x[tmp] = 1
++
++    tmp = np.where(y<1)
++    dy.flat[tmp] = np.expand_dims(2-y[tmp],1)
++    y[tmp] = 1
++    
++    return dy, edy, dx, edx, y, ey, x, ex, tmpw, tmph
++
++# function [bboxA] = rerec(bboxA)
++def rerec(bboxA):
++    # convert bboxA to square
++    h = bboxA[:,3]-bboxA[:,1]
++    w = bboxA[:,2]-bboxA[:,0]
++    l = np.maximum(w, h)
++    bboxA[:,0] = bboxA[:,0]+w*0.5-l*0.5
++    bboxA[:,1] = bboxA[:,1]+h*0.5-l*0.5
++    bboxA[:,2:4] = bboxA[:,0:2] + np.transpose(np.tile(l,(2,1)))
++    return bboxA
++
++def imresample(img, sz):
++    im_data = cv2.resize(img, (sz[1], sz[0]), interpolation=cv2.INTER_AREA) #@UndefinedVariable
++    return im_data
++
++    # This method is kept for debugging purpose
++#     h=img.shape[0]
++#     w=img.shape[1]
++#     hs, ws = sz
++#     dx = float(w) / ws
++#     dy = float(h) / hs
++#     im_data = np.zeros((hs,ws,3))
++#     for a1 in range(0,hs):
++#         for a2 in range(0,ws):
++#             for a3 in range(0,3):
++#                 im_data[a1,a2,a3] = img[int(floor(a1*dy)),int(floor(a2*dx)),a3]
++#     return im_data
++
+Index: untitled0.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- untitled0.py	(date 1542001754375)
++++ untitled0.py	(date 1542001754375)
+@@ -0,0 +1,82 @@
++# -*- coding: utf-8 -*-
++"""
++Created on Fri Mar 16 14:52:00 2018
++
++@author: sy
++"""
++
++from scipy import misc
++import tensorflow as tf
++import detect_face
++import cv2
++# import matplotlib.pyplot as plt
++from PIL import Image
++import os
++
++# import scipy.misc
++# %pylab inline
++fin = r'C:\Users\sy\Desktop\裁剪人脸\images'
++fout = r'C:\Users\sy\Desktop\裁剪人脸\裁剪'
++minsize = 20  # minimum size of face
++threshold = [0.6, 0.7, 0.7]  # three steps's threshold
++factor = 0.709  # scale factor
++margin = 44
++frame_interval = 3
++batch_size = 1000
++image_size = 182
++input_image_size = 160
++
++print('Creating networks and loading parameters')
++
++with tf.Graph().as_default():
++    gpu_options = tf.GPUOptions(allow_growth=True)
++    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
++    with sess.as_default():
++        pnet, rnet, onet = detect_face.create_mtcnn(sess,
++                                                    'E:\\mtcnn\\20170512-110547')
++
++i = 0
++
++for file in os.listdir(fin):
++    try:
++
++        file_fullname = fin + '/' + file
++        img = misc.imread(file_fullname)
++        # i+= 1
++        # img = misc.imread(image_path)
++        bounding_boxes, _ = detect_face.detect_face(img, minsize, pnet, rnet, onet, threshold, factor)
++        nrof_faces = bounding_boxes.shape[0]  # 人脸数目
++        print(nrof_faces)
++        # print('找到人脸数目为：{}'.format(nrof_faces))
++
++        # print(bounding_boxes)
++
++        crop_faces = []
++        if nrof_faces != 0:
++            for face_position in bounding_boxes:
++                face_position = face_position.astype(int)
++                print(face_position[0:4])
++                cv2.rectangle(img, (face_position[0], face_position[1]), (face_position[2], face_position[3]),
++                              (0, 255, 0), 2)
++                crop = img[face_position[1]:face_position[3],
++                       face_position[0]:face_position[2], ]
++                # print(crop)
++                # crop = cv2.resize(crop, (96, 96), interpolation=cv2.INTER_CUBIC)
++                crop_faces.append(crop)
++                img2 = Image.open(file_fullname)
++                a = face_position[0:4]
++                # print('crop_faces:',crop_faces)
++                # a = [face_position[0:4]]
++                box = (a)
++                roi = img2.crop(box)
++                i = roi.resize((250, 250))
++
++                out_path = fout + '/' + file
++
++                i.save(out_path)
++                print('success')
++        else:
++            pass
++    except:
++        pass
++
+Index: facenet.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- facenet.py	(date 1511770070000)
++++ facenet.py	(date 1511770070000)
+@@ -0,0 +1,551 @@
++"""Functions for building the face recognition network.
++"""
++# MIT License
++# 
++# Copyright (c) 2016 David Sandberg
++# 
++# Permission is hereby granted, free of charge, to any person obtaining a copy
++# of this software and associated documentation files (the "Software"), to deal
++# in the Software without restriction, including without limitation the rights
++# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++# copies of the Software, and to permit persons to whom the Software is
++# furnished to do so, subject to the following conditions:
++# 
++# The above copyright notice and this permission notice shall be included in all
++# copies or substantial portions of the Software.
++# 
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++# SOFTWARE.
++
++# pylint: disable=missing-docstring
++from __future__ import absolute_import
++from __future__ import division
++from __future__ import print_function
++
++import os
++from subprocess import Popen, PIPE
++import tensorflow as tf
++from tensorflow.python.framework import ops
++import numpy as np
++from scipy import misc
++from sklearn.model_selection import KFold
++from scipy import interpolate
++from tensorflow.python.training import training
++import random
++import re
++from tensorflow.python.platform import gfile
++from six import iteritems
++
++def triplet_loss(anchor, positive, negative, alpha):
++    """Calculate the triplet loss according to the FaceNet paper
++    
++    Args:
++      anchor: the embeddings for the anchor images.
++      positive: the embeddings for the positive images.
++      negative: the embeddings for the negative images.
++  
++    Returns:
++      the triplet loss according to the FaceNet paper as a float tensor.
++    """
++    with tf.variable_scope('triplet_loss'):
++        pos_dist = tf.reduce_sum(tf.square(tf.subtract(anchor, positive)), 1)
++        neg_dist = tf.reduce_sum(tf.square(tf.subtract(anchor, negative)), 1)
++        
++        basic_loss = tf.add(tf.subtract(pos_dist,neg_dist), alpha)
++        loss = tf.reduce_mean(tf.maximum(basic_loss, 0.0), 0)
++      
++    return loss
++  
++def decov_loss(xs):
++    """Decov loss as described in https://arxiv.org/pdf/1511.06068.pdf
++    'Reducing Overfitting In Deep Networks by Decorrelating Representation'
++    """
++    x = tf.reshape(xs, [int(xs.get_shape()[0]), -1])
++    m = tf.reduce_mean(x, 0, True)
++    z = tf.expand_dims(x-m, 2)
++    corr = tf.reduce_mean(tf.matmul(z, tf.transpose(z, perm=[0,2,1])), 0)
++    corr_frob_sqr = tf.reduce_sum(tf.square(corr))
++    corr_diag_sqr = tf.reduce_sum(tf.square(tf.diag_part(corr)))
++    loss = 0.5*(corr_frob_sqr - corr_diag_sqr)
++    return loss 
++  
++def center_loss(features, label, alfa, nrof_classes):
++    """Center loss based on the paper "A Discriminative Feature Learning Approach for Deep Face Recognition"
++       (http://ydwen.github.io/papers/WenECCV16.pdf)
++    """
++    nrof_features = features.get_shape()[1]
++    centers = tf.get_variable('centers', [nrof_classes, nrof_features], dtype=tf.float32,
++        initializer=tf.constant_initializer(0), trainable=False)
++    label = tf.reshape(label, [-1])
++    centers_batch = tf.gather(centers, label)
++    diff = (1 - alfa) * (centers_batch - features)
++    centers = tf.scatter_sub(centers, label, diff)
++    loss = tf.reduce_mean(tf.square(features - centers_batch))
++    return loss, centers
++
++def get_image_paths_and_labels(dataset):
++    image_paths_flat = []
++    labels_flat = []
++    for i in range(len(dataset)):
++        image_paths_flat += dataset[i].image_paths
++        labels_flat += [i] * len(dataset[i].image_paths)
++    return image_paths_flat, labels_flat
++
++def shuffle_examples(image_paths, labels):
++    shuffle_list = list(zip(image_paths, labels))
++    random.shuffle(shuffle_list)
++    image_paths_shuff, labels_shuff = zip(*shuffle_list)
++    return image_paths_shuff, labels_shuff
++
++def read_images_from_disk(input_queue):
++    """Consumes a single filename and label as a ' '-delimited string.
++    Args:
++      filename_and_label_tensor: A scalar string tensor.
++    Returns:
++      Two tensors: the decoded image, and the string label.
++    """
++    label = input_queue[1]
++    file_contents = tf.read_file(input_queue[0])
++    example = tf.image.decode_image(file_contents, channels=3)
++    return example, label
++  
++def random_rotate_image(image):
++    angle = np.random.uniform(low=-10.0, high=10.0)
++    return misc.imrotate(image, angle, 'bicubic')
++  
++def read_and_augment_data(image_list, label_list, image_size, batch_size, max_nrof_epochs, 
++        random_crop, random_flip, random_rotate, nrof_preprocess_threads, shuffle=True):
++    
++    images = ops.convert_to_tensor(image_list, dtype=tf.string)
++    labels = ops.convert_to_tensor(label_list, dtype=tf.int32)
++    
++    # Makes an input queue
++    input_queue = tf.train.slice_input_producer([images, labels],
++        num_epochs=max_nrof_epochs, shuffle=shuffle)
++
++    images_and_labels = []
++    for _ in range(nrof_preprocess_threads):
++        image, label = read_images_from_disk(input_queue)
++        if random_rotate:
++            image = tf.py_func(random_rotate_image, [image], tf.uint8)
++        if random_crop:
++            image = tf.random_crop(image, [image_size, image_size, 3])
++        else:
++            image = tf.image.resize_image_with_crop_or_pad(image, image_size, image_size)
++        if random_flip:
++            image = tf.image.random_flip_left_right(image)
++        #pylint: disable=no-member
++        image.set_shape((image_size, image_size, 3))
++        image = tf.image.per_image_standardization(image)
++        images_and_labels.append([image, label])
++
++    image_batch, label_batch = tf.train.batch_join(
++        images_and_labels, batch_size=batch_size,
++        capacity=4 * nrof_preprocess_threads * batch_size,
++        allow_smaller_final_batch=True)
++  
++    return image_batch, label_batch
++  
++def _add_loss_summaries(total_loss):
++    """Add summaries for losses.
++  
++    Generates moving average for all losses and associated summaries for
++    visualizing the performance of the network.
++  
++    Args:
++      total_loss: Total loss from loss().
++    Returns:
++      loss_averages_op: op for generating moving averages of losses.
++    """
++    # Compute the moving average of all individual losses and the total loss.
++    loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
++    losses = tf.get_collection('losses')
++    loss_averages_op = loss_averages.apply(losses + [total_loss])
++  
++    # Attach a scalar summmary to all individual losses and the total loss; do the
++    # same for the averaged version of the losses.
++    for l in losses + [total_loss]:
++        # Name each loss as '(raw)' and name the moving average version of the loss
++        # as the original loss name.
++        tf.summary.scalar(l.op.name +' (raw)', l)
++        tf.summary.scalar(l.op.name, loss_averages.average(l))
++  
++    return loss_averages_op
++
++def train(total_loss, global_step, optimizer, learning_rate, moving_average_decay, update_gradient_vars, log_histograms=True):
++    # Generate moving averages of all losses and associated summaries.
++    loss_averages_op = _add_loss_summaries(total_loss)
++
++    # Compute gradients.
++    with tf.control_dependencies([loss_averages_op]):
++        if optimizer=='ADAGRAD':
++            opt = tf.train.AdagradOptimizer(learning_rate)
++        elif optimizer=='ADADELTA':
++            opt = tf.train.AdadeltaOptimizer(learning_rate, rho=0.9, epsilon=1e-6)
++        elif optimizer=='ADAM':
++            opt = tf.train.AdamOptimizer(learning_rate, beta1=0.9, beta2=0.999, epsilon=0.1)
++        elif optimizer=='RMSPROP':
++            opt = tf.train.RMSPropOptimizer(learning_rate, decay=0.9, momentum=0.9, epsilon=1.0)
++        elif optimizer=='MOM':
++            opt = tf.train.MomentumOptimizer(learning_rate, 0.9, use_nesterov=True)
++        else:
++            raise ValueError('Invalid optimization algorithm')
++    
++        grads = opt.compute_gradients(total_loss, update_gradient_vars)
++        
++    # Apply gradients.
++    apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
++  
++    # Add histograms for trainable variables.
++    if log_histograms:
++        for var in tf.trainable_variables():
++            tf.summary.histogram(var.op.name, var)
++   
++    # Add histograms for gradients.
++    if log_histograms:
++        for grad, var in grads:
++            if grad is not None:
++                tf.summary.histogram(var.op.name + '/gradients', grad)
++  
++    # Track the moving averages of all trainable variables.
++    variable_averages = tf.train.ExponentialMovingAverage(
++        moving_average_decay, global_step)
++    variables_averages_op = variable_averages.apply(tf.trainable_variables())
++  
++    with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
++        train_op = tf.no_op(name='train')
++  
++    return train_op
++
++def prewhiten(x):
++    mean = np.mean(x)
++    std = np.std(x)
++    std_adj = np.maximum(std, 1.0/np.sqrt(x.size))
++    y = np.multiply(np.subtract(x, mean), 1/std_adj)
++    return y  
++
++def crop(image, random_crop, image_size):
++    if image.shape[1]>image_size:
++        sz1 = int(image.shape[1]//2)
++        sz2 = int(image_size//2)
++        if random_crop:
++            diff = sz1-sz2
++            (h, v) = (np.random.randint(-diff, diff+1), np.random.randint(-diff, diff+1))
++        else:
++            (h, v) = (0,0)
++        image = image[(sz1-sz2+v):(sz1+sz2+v),(sz1-sz2+h):(sz1+sz2+h),:]
++    return image
++  
++def flip(image, random_flip):
++    if random_flip and np.random.choice([True, False]):
++        image = np.fliplr(image)
++    return image
++
++def to_rgb(img):
++    w, h = img.shape
++    ret = np.empty((w, h, 3), dtype=np.uint8)
++    ret[:, :, 0] = ret[:, :, 1] = ret[:, :, 2] = img
++    return ret
++  
++def load_data(image_paths, do_random_crop, do_random_flip, image_size, do_prewhiten=True):
++    nrof_samples = len(image_paths)
++    images = np.zeros((nrof_samples, image_size, image_size, 3))
++    for i in range(nrof_samples):
++        img = misc.imread(image_paths[i])
++        if img.ndim == 2:
++            img = to_rgb(img)
++        if do_prewhiten:
++            img = prewhiten(img)
++        img = crop(img, do_random_crop, image_size)
++        img = flip(img, do_random_flip)
++        images[i,:,:,:] = img
++    return images
++
++def get_label_batch(label_data, batch_size, batch_index):
++    nrof_examples = np.size(label_data, 0)
++    j = batch_index*batch_size % nrof_examples
++    if j+batch_size<=nrof_examples:
++        batch = label_data[j:j+batch_size]
++    else:
++        x1 = label_data[j:nrof_examples]
++        x2 = label_data[0:nrof_examples-j]
++        batch = np.vstack([x1,x2])
++    batch_int = batch.astype(np.int64)
++    return batch_int
++
++def get_batch(image_data, batch_size, batch_index):
++    nrof_examples = np.size(image_data, 0)
++    j = batch_index*batch_size % nrof_examples
++    if j+batch_size<=nrof_examples:
++        batch = image_data[j:j+batch_size,:,:,:]
++    else:
++        x1 = image_data[j:nrof_examples,:,:,:]
++        x2 = image_data[0:nrof_examples-j,:,:,:]
++        batch = np.vstack([x1,x2])
++    batch_float = batch.astype(np.float32)
++    return batch_float
++
++def get_triplet_batch(triplets, batch_index, batch_size):
++    ax, px, nx = triplets
++    a = get_batch(ax, int(batch_size/3), batch_index)
++    p = get_batch(px, int(batch_size/3), batch_index)
++    n = get_batch(nx, int(batch_size/3), batch_index)
++    batch = np.vstack([a, p, n])
++    return batch
++
++def get_learning_rate_from_file(filename, epoch):
++    with open(filename, 'r') as f:
++        for line in f.readlines():
++            line = line.split('#', 1)[0]
++            if line:
++                par = line.strip().split(':')
++                e = int(par[0])
++                lr = float(par[1])
++                if e <= epoch:
++                    learning_rate = lr
++                else:
++                    return learning_rate
++
++class ImageClass():
++    "Stores the paths to images for a given class"
++    def __init__(self, name, image_paths):
++        self.name = name
++        self.image_paths = image_paths
++  
++    def __str__(self):
++        return self.name + ', ' + str(len(self.image_paths)) + ' images'
++  
++    def __len__(self):
++        return len(self.image_paths)
++  
++def get_dataset(path, has_class_directories=True):
++    dataset = []
++    path_exp = os.path.expanduser(path)
++    classes = os.listdir(path_exp)
++    classes.sort()
++    nrof_classes = len(classes)
++    for i in range(nrof_classes):
++        class_name = classes[i]
++        facedir = os.path.join(path_exp, class_name)
++        image_paths = get_image_paths(facedir)
++        dataset.append(ImageClass(class_name, image_paths))
++  
++    return dataset
++
++def get_image_paths(facedir):
++    image_paths = []
++    if os.path.isdir(facedir):
++        images = os.listdir(facedir)
++        image_paths = [os.path.join(facedir,img) for img in images]
++    return image_paths
++  
++def split_dataset(dataset, split_ratio, mode):
++    if mode=='SPLIT_CLASSES':
++        nrof_classes = len(dataset)
++        class_indices = np.arange(nrof_classes)
++        np.random.shuffle(class_indices)
++        split = int(round(nrof_classes*split_ratio))
++        train_set = [dataset[i] for i in class_indices[0:split]]
++        test_set = [dataset[i] for i in class_indices[split:-1]]
++    elif mode=='SPLIT_IMAGES':
++        train_set = []
++        test_set = []
++        min_nrof_images = 2
++        for cls in dataset:
++            paths = cls.image_paths
++            np.random.shuffle(paths)
++            split = int(round(len(paths)*split_ratio))
++            if split<min_nrof_images:
++                continue  # Not enough images for test set. Skip class...
++            train_set.append(ImageClass(cls.name, paths[0:split]))
++            test_set.append(ImageClass(cls.name, paths[split:-1]))
++    else:
++        raise ValueError('Invalid train/test split mode "%s"' % mode)
++    return train_set, test_set
++
++def load_model(model):
++    # Check if the model is a model directory (containing a metagraph and a checkpoint file)
++    #  or if it is a protobuf file with a frozen graph
++    model_exp = os.path.expanduser(model)
++    if (os.path.isfile(model_exp)):
++        print('Model filename: %s' % model_exp)
++        with gfile.FastGFile(model_exp,'rb') as f:
++            graph_def = tf.GraphDef()
++            graph_def.ParseFromString(f.read())
++            tf.import_graph_def(graph_def, name='')
++    else:
++        print('Model directory: %s' % model_exp)
++        meta_file, ckpt_file = get_model_filenames(model_exp)
++        
++        print('Metagraph file: %s' % meta_file)
++        print('Checkpoint file: %s' % ckpt_file)
++      
++        saver = tf.train.import_meta_graph(os.path.join(model_exp, meta_file))
++        saver.restore(tf.get_default_session(), os.path.join(model_exp, ckpt_file))
++    
++def get_model_filenames(model_dir):
++    files = os.listdir(model_dir)
++    meta_files = [s for s in files if s.endswith('.meta')]
++    if len(meta_files)==0:
++        raise ValueError('No meta file found in the model directory (%s)' % model_dir)
++    elif len(meta_files)>1:
++        raise ValueError('There should not be more than one meta file in the model directory (%s)' % model_dir)
++    meta_file = meta_files[0]
++    meta_files = [s for s in files if '.ckpt' in s]
++    max_step = -1
++    for f in files:
++        step_str = re.match(r'(^model-[\w\- ]+.ckpt-(\d+))', f)
++        if step_str is not None and len(step_str.groups())>=2:
++            step = int(step_str.groups()[1])
++            if step > max_step:
++                max_step = step
++                ckpt_file = step_str.groups()[0]
++    return meta_file, ckpt_file
++
++def calculate_roc(thresholds, embeddings1, embeddings2, actual_issame, nrof_folds=10):
++    assert(embeddings1.shape[0] == embeddings2.shape[0])
++    assert(embeddings1.shape[1] == embeddings2.shape[1])
++    nrof_pairs = min(len(actual_issame), embeddings1.shape[0])
++    nrof_thresholds = len(thresholds)
++    k_fold = KFold(n_splits=nrof_folds, shuffle=False)
++    
++    tprs = np.zeros((nrof_folds,nrof_thresholds))
++    fprs = np.zeros((nrof_folds,nrof_thresholds))
++    accuracy = np.zeros((nrof_folds))
++    
++    diff = np.subtract(embeddings1, embeddings2)
++    dist = np.sum(np.square(diff),1)
++    indices = np.arange(nrof_pairs)
++    
++    for fold_idx, (train_set, test_set) in enumerate(k_fold.split(indices)):
++        
++        # Find the best threshold for the fold
++        acc_train = np.zeros((nrof_thresholds))
++        for threshold_idx, threshold in enumerate(thresholds):
++            _, _, acc_train[threshold_idx] = calculate_accuracy(threshold, dist[train_set], actual_issame[train_set])
++        best_threshold_index = np.argmax(acc_train)
++        for threshold_idx, threshold in enumerate(thresholds):
++            tprs[fold_idx,threshold_idx], fprs[fold_idx,threshold_idx], _ = calculate_accuracy(threshold, dist[test_set], actual_issame[test_set])
++        _, _, accuracy[fold_idx] = calculate_accuracy(thresholds[best_threshold_index], dist[test_set], actual_issame[test_set])
++          
++    tpr = np.mean(tprs,0)
++    fpr = np.mean(fprs,0)
++    return tpr, fpr, accuracy
++
++def calculate_accuracy(threshold, dist, actual_issame):
++    predict_issame = np.less(dist, threshold)
++    tp = np.sum(np.logical_and(predict_issame, actual_issame))
++    fp = np.sum(np.logical_and(predict_issame, np.logical_not(actual_issame)))
++    tn = np.sum(np.logical_and(np.logical_not(predict_issame), np.logical_not(actual_issame)))
++    fn = np.sum(np.logical_and(np.logical_not(predict_issame), actual_issame))
++  
++    tpr = 0 if (tp+fn==0) else float(tp) / float(tp+fn)
++    fpr = 0 if (fp+tn==0) else float(fp) / float(fp+tn)
++    acc = float(tp+tn)/dist.size
++    return tpr, fpr, acc
++
++
++  
++def calculate_val(thresholds, embeddings1, embeddings2, actual_issame, far_target, nrof_folds=10):
++    assert(embeddings1.shape[0] == embeddings2.shape[0])
++    assert(embeddings1.shape[1] == embeddings2.shape[1])
++    nrof_pairs = min(len(actual_issame), embeddings1.shape[0])
++    nrof_thresholds = len(thresholds)
++    k_fold = KFold(n_splits=nrof_folds, shuffle=False)
++    
++    val = np.zeros(nrof_folds)
++    far = np.zeros(nrof_folds)
++    
++    diff = np.subtract(embeddings1, embeddings2)
++    dist = np.sum(np.square(diff),1)
++    indices = np.arange(nrof_pairs)
++    
++    for fold_idx, (train_set, test_set) in enumerate(k_fold.split(indices)):
++      
++        # Find the threshold that gives FAR = far_target
++        far_train = np.zeros(nrof_thresholds)
++        for threshold_idx, threshold in enumerate(thresholds):
++            _, far_train[threshold_idx] = calculate_val_far(threshold, dist[train_set], actual_issame[train_set])
++        if np.max(far_train)>=far_target:
++            f = interpolate.interp1d(far_train, thresholds, kind='slinear')
++            threshold = f(far_target)
++        else:
++            threshold = 0.0
++    
++        val[fold_idx], far[fold_idx] = calculate_val_far(threshold, dist[test_set], actual_issame[test_set])
++  
++    val_mean = np.mean(val)
++    far_mean = np.mean(far)
++    val_std = np.std(val)
++    return val_mean, val_std, far_mean
++
++
++def calculate_val_far(threshold, dist, actual_issame):
++    predict_issame = np.less(dist, threshold)
++    true_accept = np.sum(np.logical_and(predict_issame, actual_issame))
++    false_accept = np.sum(np.logical_and(predict_issame, np.logical_not(actual_issame)))
++    n_same = np.sum(actual_issame)
++    n_diff = np.sum(np.logical_not(actual_issame))
++    val = float(true_accept) / float(n_same)
++    far = float(false_accept) / float(n_diff)
++    return val, far
++
++def store_revision_info(src_path, output_dir, arg_string):
++    try:
++        # Get git hash
++        cmd = ['git', 'rev-parse', 'HEAD']
++        gitproc = Popen(cmd, stdout = PIPE, cwd=src_path)
++        (stdout, _) = gitproc.communicate()
++        git_hash = stdout.strip()
++    except OSError as e:
++        git_hash = ' '.join(cmd) + ': ' +  e.strerror
++  
++    try:
++        # Get local changes
++        cmd = ['git', 'diff', 'HEAD']
++        gitproc = Popen(cmd, stdout = PIPE, cwd=src_path)
++        (stdout, _) = gitproc.communicate()
++        git_diff = stdout.strip()
++    except OSError as e:
++        git_diff = ' '.join(cmd) + ': ' +  e.strerror
++    
++    # Store a text file in the log directory
++    rev_info_filename = os.path.join(output_dir, 'revision_info.txt')
++    with open(rev_info_filename, "w") as text_file:
++        text_file.write('arguments: %s\n--------------------\n' % arg_string)
++        text_file.write('tensorflow version: %s\n--------------------\n' % tf.__version__)  # @UndefinedVariable
++        text_file.write('git hash: %s\n--------------------\n' % git_hash)
++        text_file.write('%s' % git_diff)
++
++def list_variables(filename):
++    reader = training.NewCheckpointReader(filename)
++    variable_map = reader.get_variable_to_shape_map()
++    names = sorted(variable_map.keys())
++    return names
++
++def put_images_on_grid(images, shape=(16,8)):
++    nrof_images = images.shape[0]
++    img_size = images.shape[1]
++    bw = 3
++    img = np.zeros((shape[1]*(img_size+bw)+bw, shape[0]*(img_size+bw)+bw, 3), np.float32)
++    for i in range(shape[1]):
++        x_start = i*(img_size+bw)+bw
++        for j in range(shape[0]):
++            img_index = i*shape[0]+j
++            if img_index>=nrof_images:
++                break
++            y_start = j*(img_size+bw)+bw
++            img[x_start:x_start+img_size, y_start:y_start+img_size, :] = images[img_index, :, :, :]
++        if img_index>=nrof_images:
++            break
++    return img
++
++def write_arguments_to_file(args, filename):
++    with open(filename, 'w') as f:
++        for key, value in iteritems(vars(args)):
++            f.write('%s: %s\n' % (key, str(value)))
+\ No newline at end of file
+Index: path.txt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- path.txt	(date 1541577534488)
++++ path.txt	(date 1541577534488)
+@@ -0,0 +1,1039 @@
++C:\Users\sy\Desktop\image_�ü�\101_1.png
++C:\Users\sy\Desktop\image_�ü�\101_10.png
++C:\Users\sy\Desktop\image_�ü�\101_11.png
++C:\Users\sy\Desktop\image_�ü�\101_12.png
++C:\Users\sy\Desktop\image_�ü�\101_13.png
++C:\Users\sy\Desktop\image_�ü�\101_14.png
++C:\Users\sy\Desktop\image_�ü�\101_15.png
++C:\Users\sy\Desktop\image_�ü�\101_16.png
++C:\Users\sy\Desktop\image_�ü�\101_17.png
++C:\Users\sy\Desktop\image_�ü�\101_18.png
++C:\Users\sy\Desktop\image_�ü�\101_19.png
++C:\Users\sy\Desktop\image_�ü�\101_2.png
++C:\Users\sy\Desktop\image_�ü�\101_20.png
++C:\Users\sy\Desktop\image_�ü�\101_3.png
++C:\Users\sy\Desktop\image_�ü�\101_4.png
++C:\Users\sy\Desktop\image_�ü�\101_5.png
++C:\Users\sy\Desktop\image_�ü�\101_6.png
++C:\Users\sy\Desktop\image_�ü�\101_7.png
++C:\Users\sy\Desktop\image_�ü�\101_8.png
++C:\Users\sy\Desktop\image_�ü�\101_9.png
++C:\Users\sy\Desktop\image_�ü�\103_1.png
++C:\Users\sy\Desktop\image_�ü�\103_10.png
++C:\Users\sy\Desktop\image_�ü�\103_11.png
++C:\Users\sy\Desktop\image_�ü�\103_12.png
++C:\Users\sy\Desktop\image_�ü�\103_13.png
++C:\Users\sy\Desktop\image_�ü�\103_14.png
++C:\Users\sy\Desktop\image_�ü�\103_15.png
++C:\Users\sy\Desktop\image_�ü�\103_16.png
++C:\Users\sy\Desktop\image_�ü�\103_17.png
++C:\Users\sy\Desktop\image_�ü�\103_18.png
++C:\Users\sy\Desktop\image_�ü�\103_19.png
++C:\Users\sy\Desktop\image_�ü�\103_2.png
++C:\Users\sy\Desktop\image_�ü�\103_20.png
++C:\Users\sy\Desktop\image_�ü�\103_3.png
++C:\Users\sy\Desktop\image_�ü�\103_4.png
++C:\Users\sy\Desktop\image_�ü�\103_5.png
++C:\Users\sy\Desktop\image_�ü�\103_6.png
++C:\Users\sy\Desktop\image_�ü�\103_7.png
++C:\Users\sy\Desktop\image_�ü�\103_8.png
++C:\Users\sy\Desktop\image_�ü�\103_9.png
++C:\Users\sy\Desktop\image_�ü�\105_1.png
++C:\Users\sy\Desktop\image_�ü�\105_10.png
++C:\Users\sy\Desktop\image_�ü�\105_11.png
++C:\Users\sy\Desktop\image_�ü�\105_12.png
++C:\Users\sy\Desktop\image_�ü�\105_13.png
++C:\Users\sy\Desktop\image_�ü�\105_14.png
++C:\Users\sy\Desktop\image_�ü�\105_15.png
++C:\Users\sy\Desktop\image_�ü�\105_16.png
++C:\Users\sy\Desktop\image_�ü�\105_17.png
++C:\Users\sy\Desktop\image_�ü�\105_18.png
++C:\Users\sy\Desktop\image_�ü�\105_19.png
++C:\Users\sy\Desktop\image_�ü�\105_2.png
++C:\Users\sy\Desktop\image_�ü�\105_20.png
++C:\Users\sy\Desktop\image_�ü�\105_3.png
++C:\Users\sy\Desktop\image_�ü�\105_5.png
++C:\Users\sy\Desktop\image_�ü�\105_6.png
++C:\Users\sy\Desktop\image_�ü�\105_7.png
++C:\Users\sy\Desktop\image_�ü�\105_8.png
++C:\Users\sy\Desktop\image_�ü�\105_9.png
++C:\Users\sy\Desktop\image_�ü�\106_1.png
++C:\Users\sy\Desktop\image_�ü�\106_10.png
++C:\Users\sy\Desktop\image_�ü�\106_11.png
++C:\Users\sy\Desktop\image_�ü�\106_12.png
++C:\Users\sy\Desktop\image_�ü�\106_13.png
++C:\Users\sy\Desktop\image_�ü�\106_14.png
++C:\Users\sy\Desktop\image_�ü�\106_15.png
++C:\Users\sy\Desktop\image_�ü�\106_16.png
++C:\Users\sy\Desktop\image_�ü�\106_17.png
++C:\Users\sy\Desktop\image_�ü�\106_18.png
++C:\Users\sy\Desktop\image_�ü�\106_19.png
++C:\Users\sy\Desktop\image_�ü�\106_2.png
++C:\Users\sy\Desktop\image_�ü�\106_20.png
++C:\Users\sy\Desktop\image_�ü�\106_3.png
++C:\Users\sy\Desktop\image_�ü�\106_4.png
++C:\Users\sy\Desktop\image_�ü�\106_5.png
++C:\Users\sy\Desktop\image_�ü�\106_6.png
++C:\Users\sy\Desktop\image_�ü�\106_7.png
++C:\Users\sy\Desktop\image_�ü�\106_8.png
++C:\Users\sy\Desktop\image_�ü�\106_9.png
++C:\Users\sy\Desktop\image_�ü�\108_1.png
++C:\Users\sy\Desktop\image_�ü�\108_10.png
++C:\Users\sy\Desktop\image_�ü�\108_11.png
++C:\Users\sy\Desktop\image_�ü�\108_12.png
++C:\Users\sy\Desktop\image_�ü�\108_13.png
++C:\Users\sy\Desktop\image_�ü�\108_14.png
++C:\Users\sy\Desktop\image_�ü�\108_15.png
++C:\Users\sy\Desktop\image_�ü�\108_16.png
++C:\Users\sy\Desktop\image_�ü�\108_17.png
++C:\Users\sy\Desktop\image_�ü�\108_18.png
++C:\Users\sy\Desktop\image_�ü�\108_19.png
++C:\Users\sy\Desktop\image_�ü�\108_2.png
++C:\Users\sy\Desktop\image_�ü�\108_20.png
++C:\Users\sy\Desktop\image_�ü�\108_3.png
++C:\Users\sy\Desktop\image_�ü�\108_4.png
++C:\Users\sy\Desktop\image_�ü�\108_5.png
++C:\Users\sy\Desktop\image_�ü�\108_6.png
++C:\Users\sy\Desktop\image_�ü�\108_7.png
++C:\Users\sy\Desktop\image_�ü�\108_8.png
++C:\Users\sy\Desktop\image_�ü�\108_9.png
++C:\Users\sy\Desktop\image_�ü�\112_1.png
++C:\Users\sy\Desktop\image_�ü�\112_10.png
++C:\Users\sy\Desktop\image_�ü�\112_11.png
++C:\Users\sy\Desktop\image_�ü�\112_12.png
++C:\Users\sy\Desktop\image_�ü�\112_13.png
++C:\Users\sy\Desktop\image_�ü�\112_14.png
++C:\Users\sy\Desktop\image_�ü�\112_15.png
++C:\Users\sy\Desktop\image_�ü�\112_16.png
++C:\Users\sy\Desktop\image_�ü�\112_17.png
++C:\Users\sy\Desktop\image_�ü�\112_18.png
++C:\Users\sy\Desktop\image_�ü�\112_19.png
++C:\Users\sy\Desktop\image_�ü�\112_2.png
++C:\Users\sy\Desktop\image_�ü�\112_20.png
++C:\Users\sy\Desktop\image_�ü�\112_3.png
++C:\Users\sy\Desktop\image_�ü�\112_4.png
++C:\Users\sy\Desktop\image_�ü�\112_5.png
++C:\Users\sy\Desktop\image_�ü�\112_6.png
++C:\Users\sy\Desktop\image_�ü�\112_7.png
++C:\Users\sy\Desktop\image_�ü�\112_8.png
++C:\Users\sy\Desktop\image_�ü�\112_9.png
++C:\Users\sy\Desktop\image_�ü�\115_1.png
++C:\Users\sy\Desktop\image_�ü�\115_10.png
++C:\Users\sy\Desktop\image_�ü�\115_11.png
++C:\Users\sy\Desktop\image_�ü�\115_12.png
++C:\Users\sy\Desktop\image_�ü�\115_13.png
++C:\Users\sy\Desktop\image_�ü�\115_14.png
++C:\Users\sy\Desktop\image_�ü�\115_15.png
++C:\Users\sy\Desktop\image_�ü�\115_16.png
++C:\Users\sy\Desktop\image_�ü�\115_17.png
++C:\Users\sy\Desktop\image_�ü�\115_18.png
++C:\Users\sy\Desktop\image_�ü�\115_19.png
++C:\Users\sy\Desktop\image_�ü�\115_2.png
++C:\Users\sy\Desktop\image_�ü�\115_20.png
++C:\Users\sy\Desktop\image_�ü�\115_3.png
++C:\Users\sy\Desktop\image_�ü�\115_4.png
++C:\Users\sy\Desktop\image_�ü�\115_5.png
++C:\Users\sy\Desktop\image_�ü�\115_6.png
++C:\Users\sy\Desktop\image_�ü�\115_7.png
++C:\Users\sy\Desktop\image_�ü�\115_8.png
++C:\Users\sy\Desktop\image_�ü�\115_9.png
++C:\Users\sy\Desktop\image_�ü�\131_1.png
++C:\Users\sy\Desktop\image_�ü�\131_10.png
++C:\Users\sy\Desktop\image_�ü�\131_11.png
++C:\Users\sy\Desktop\image_�ü�\131_12.png
++C:\Users\sy\Desktop\image_�ü�\131_13.png
++C:\Users\sy\Desktop\image_�ü�\131_14.png
++C:\Users\sy\Desktop\image_�ü�\131_15.png
++C:\Users\sy\Desktop\image_�ü�\131_16.png
++C:\Users\sy\Desktop\image_�ü�\131_17.png
++C:\Users\sy\Desktop\image_�ü�\131_18.png
++C:\Users\sy\Desktop\image_�ü�\131_19.png
++C:\Users\sy\Desktop\image_�ü�\131_2.png
++C:\Users\sy\Desktop\image_�ü�\131_20.png
++C:\Users\sy\Desktop\image_�ü�\131_3.png
++C:\Users\sy\Desktop\image_�ü�\131_4.png
++C:\Users\sy\Desktop\image_�ü�\131_5.png
++C:\Users\sy\Desktop\image_�ü�\131_6.png
++C:\Users\sy\Desktop\image_�ü�\131_7.png
++C:\Users\sy\Desktop\image_�ü�\131_8.png
++C:\Users\sy\Desktop\image_�ü�\131_9.png
++C:\Users\sy\Desktop\image_�ü�\133_1.png
++C:\Users\sy\Desktop\image_�ü�\133_10.png
++C:\Users\sy\Desktop\image_�ü�\133_11.png
++C:\Users\sy\Desktop\image_�ü�\133_12.png
++C:\Users\sy\Desktop\image_�ü�\133_13.png
++C:\Users\sy\Desktop\image_�ü�\133_14.png
++C:\Users\sy\Desktop\image_�ü�\133_15.png
++C:\Users\sy\Desktop\image_�ü�\133_16.png
++C:\Users\sy\Desktop\image_�ü�\133_17.png
++C:\Users\sy\Desktop\image_�ü�\133_18.png
++C:\Users\sy\Desktop\image_�ü�\133_19.png
++C:\Users\sy\Desktop\image_�ü�\133_20.png
++C:\Users\sy\Desktop\image_�ü�\133_3.png
++C:\Users\sy\Desktop\image_�ü�\133_4.png
++C:\Users\sy\Desktop\image_�ü�\133_5.png
++C:\Users\sy\Desktop\image_�ü�\133_6.png
++C:\Users\sy\Desktop\image_�ü�\133_7.png
++C:\Users\sy\Desktop\image_�ü�\133_8.png
++C:\Users\sy\Desktop\image_�ü�\133_9.png
++C:\Users\sy\Desktop\image_�ü�\136_1.png
++C:\Users\sy\Desktop\image_�ü�\136_10.png
++C:\Users\sy\Desktop\image_�ü�\136_11.png
++C:\Users\sy\Desktop\image_�ü�\136_12.png
++C:\Users\sy\Desktop\image_�ü�\136_13.png
++C:\Users\sy\Desktop\image_�ü�\136_14.png
++C:\Users\sy\Desktop\image_�ü�\136_15.png
++C:\Users\sy\Desktop\image_�ü�\136_16.png
++C:\Users\sy\Desktop\image_�ü�\136_17.png
++C:\Users\sy\Desktop\image_�ü�\136_19.png
++C:\Users\sy\Desktop\image_�ü�\136_2.png
++C:\Users\sy\Desktop\image_�ü�\136_20.png
++C:\Users\sy\Desktop\image_�ü�\136_3.png
++C:\Users\sy\Desktop\image_�ü�\136_4.png
++C:\Users\sy\Desktop\image_�ü�\136_5.png
++C:\Users\sy\Desktop\image_�ü�\136_6.png
++C:\Users\sy\Desktop\image_�ü�\136_7.png
++C:\Users\sy\Desktop\image_�ü�\136_8.png
++C:\Users\sy\Desktop\image_�ü�\136_9.png
++C:\Users\sy\Desktop\image_�ü�\141_1.png
++C:\Users\sy\Desktop\image_�ü�\141_10.png
++C:\Users\sy\Desktop\image_�ü�\141_11.png
++C:\Users\sy\Desktop\image_�ü�\141_12.png
++C:\Users\sy\Desktop\image_�ü�\141_13.png
++C:\Users\sy\Desktop\image_�ü�\141_14.png
++C:\Users\sy\Desktop\image_�ü�\141_15.png
++C:\Users\sy\Desktop\image_�ü�\141_16.png
++C:\Users\sy\Desktop\image_�ü�\141_17.png
++C:\Users\sy\Desktop\image_�ü�\141_18.png
++C:\Users\sy\Desktop\image_�ü�\141_19.png
++C:\Users\sy\Desktop\image_�ü�\141_2.png
++C:\Users\sy\Desktop\image_�ü�\141_20.png
++C:\Users\sy\Desktop\image_�ü�\141_3.png
++C:\Users\sy\Desktop\image_�ü�\141_4.png
++C:\Users\sy\Desktop\image_�ü�\141_5.png
++C:\Users\sy\Desktop\image_�ü�\141_6.png
++C:\Users\sy\Desktop\image_�ü�\141_8.png
++C:\Users\sy\Desktop\image_�ü�\141_9.png
++C:\Users\sy\Desktop\image_�ü�\143_1.png
++C:\Users\sy\Desktop\image_�ü�\143_10.png
++C:\Users\sy\Desktop\image_�ü�\143_11.png
++C:\Users\sy\Desktop\image_�ü�\143_12.png
++C:\Users\sy\Desktop\image_�ü�\143_13.png
++C:\Users\sy\Desktop\image_�ü�\143_14.png
++C:\Users\sy\Desktop\image_�ü�\143_15.png
++C:\Users\sy\Desktop\image_�ü�\143_16.png
++C:\Users\sy\Desktop\image_�ü�\143_17.png
++C:\Users\sy\Desktop\image_�ü�\143_18.png
++C:\Users\sy\Desktop\image_�ü�\143_19.png
++C:\Users\sy\Desktop\image_�ü�\143_2.png
++C:\Users\sy\Desktop\image_�ü�\143_20.png
++C:\Users\sy\Desktop\image_�ü�\143_3.png
++C:\Users\sy\Desktop\image_�ü�\143_4.png
++C:\Users\sy\Desktop\image_�ü�\143_5.png
++C:\Users\sy\Desktop\image_�ü�\143_6.png
++C:\Users\sy\Desktop\image_�ü�\143_7.png
++C:\Users\sy\Desktop\image_�ü�\143_8.png
++C:\Users\sy\Desktop\image_�ü�\143_9.png
++C:\Users\sy\Desktop\image_�ü�\145_1.png
++C:\Users\sy\Desktop\image_�ü�\145_10.png
++C:\Users\sy\Desktop\image_�ü�\145_11.png
++C:\Users\sy\Desktop\image_�ü�\145_12.png
++C:\Users\sy\Desktop\image_�ü�\145_13.png
++C:\Users\sy\Desktop\image_�ü�\145_14.png
++C:\Users\sy\Desktop\image_�ü�\145_15.png
++C:\Users\sy\Desktop\image_�ü�\145_16.png
++C:\Users\sy\Desktop\image_�ü�\145_17.png
++C:\Users\sy\Desktop\image_�ü�\145_18.png
++C:\Users\sy\Desktop\image_�ü�\145_19.png
++C:\Users\sy\Desktop\image_�ü�\145_2.png
++C:\Users\sy\Desktop\image_�ü�\145_20.png
++C:\Users\sy\Desktop\image_�ü�\145_3.png
++C:\Users\sy\Desktop\image_�ü�\145_4.png
++C:\Users\sy\Desktop\image_�ü�\145_5.png
++C:\Users\sy\Desktop\image_�ü�\145_6.png
++C:\Users\sy\Desktop\image_�ü�\145_7.png
++C:\Users\sy\Desktop\image_�ü�\145_8.png
++C:\Users\sy\Desktop\image_�ü�\145_9.png
++C:\Users\sy\Desktop\image_�ü�\22_1.png
++C:\Users\sy\Desktop\image_�ü�\22_10.png
++C:\Users\sy\Desktop\image_�ü�\22_11.png
++C:\Users\sy\Desktop\image_�ü�\22_12.png
++C:\Users\sy\Desktop\image_�ü�\22_13.png
++C:\Users\sy\Desktop\image_�ü�\22_14.png
++C:\Users\sy\Desktop\image_�ü�\22_15.png
++C:\Users\sy\Desktop\image_�ü�\22_16.png
++C:\Users\sy\Desktop\image_�ü�\22_17.png
++C:\Users\sy\Desktop\image_�ü�\22_18.png
++C:\Users\sy\Desktop\image_�ü�\22_19.png
++C:\Users\sy\Desktop\image_�ü�\22_2.png
++C:\Users\sy\Desktop\image_�ü�\22_20.png
++C:\Users\sy\Desktop\image_�ü�\22_3.png
++C:\Users\sy\Desktop\image_�ü�\22_4.png
++C:\Users\sy\Desktop\image_�ü�\22_5.png
++C:\Users\sy\Desktop\image_�ü�\22_6.png
++C:\Users\sy\Desktop\image_�ü�\22_7.png
++C:\Users\sy\Desktop\image_�ü�\22_8.png
++C:\Users\sy\Desktop\image_�ü�\22_9.png
++C:\Users\sy\Desktop\image_�ü�\23_1.png
++C:\Users\sy\Desktop\image_�ü�\23_10.png
++C:\Users\sy\Desktop\image_�ü�\23_11.png
++C:\Users\sy\Desktop\image_�ü�\23_12.png
++C:\Users\sy\Desktop\image_�ü�\23_13.png
++C:\Users\sy\Desktop\image_�ü�\23_14.png
++C:\Users\sy\Desktop\image_�ü�\23_15.png
++C:\Users\sy\Desktop\image_�ü�\23_16.png
++C:\Users\sy\Desktop\image_�ü�\23_17.png
++C:\Users\sy\Desktop\image_�ü�\23_18.png
++C:\Users\sy\Desktop\image_�ü�\23_19.png
++C:\Users\sy\Desktop\image_�ü�\23_2.png
++C:\Users\sy\Desktop\image_�ü�\23_20.png
++C:\Users\sy\Desktop\image_�ü�\23_4.png
++C:\Users\sy\Desktop\image_�ü�\23_5.png
++C:\Users\sy\Desktop\image_�ü�\23_6.png
++C:\Users\sy\Desktop\image_�ü�\23_7.png
++C:\Users\sy\Desktop\image_�ü�\23_9.png
++C:\Users\sy\Desktop\image_�ü�\24_1.png
++C:\Users\sy\Desktop\image_�ü�\24_10.png
++C:\Users\sy\Desktop\image_�ü�\24_11.png
++C:\Users\sy\Desktop\image_�ü�\24_12.png
++C:\Users\sy\Desktop\image_�ü�\24_13.png
++C:\Users\sy\Desktop\image_�ü�\24_14.png
++C:\Users\sy\Desktop\image_�ü�\24_15.png
++C:\Users\sy\Desktop\image_�ü�\24_16.png
++C:\Users\sy\Desktop\image_�ü�\24_17.png
++C:\Users\sy\Desktop\image_�ü�\24_18.png
++C:\Users\sy\Desktop\image_�ü�\24_19.png
++C:\Users\sy\Desktop\image_�ü�\24_2.png
++C:\Users\sy\Desktop\image_�ü�\24_20.png
++C:\Users\sy\Desktop\image_�ü�\24_3.png
++C:\Users\sy\Desktop\image_�ü�\24_4.png
++C:\Users\sy\Desktop\image_�ü�\24_5.png
++C:\Users\sy\Desktop\image_�ü�\24_6.png
++C:\Users\sy\Desktop\image_�ü�\24_7.png
++C:\Users\sy\Desktop\image_�ü�\24_8.png
++C:\Users\sy\Desktop\image_�ü�\24_9.png
++C:\Users\sy\Desktop\image_�ü�\26_1.png
++C:\Users\sy\Desktop\image_�ü�\26_10.png
++C:\Users\sy\Desktop\image_�ü�\26_11.png
++C:\Users\sy\Desktop\image_�ü�\26_12.png
++C:\Users\sy\Desktop\image_�ü�\26_13.png
++C:\Users\sy\Desktop\image_�ü�\26_14.png
++C:\Users\sy\Desktop\image_�ü�\26_15.png
++C:\Users\sy\Desktop\image_�ü�\26_16.png
++C:\Users\sy\Desktop\image_�ü�\26_17.png
++C:\Users\sy\Desktop\image_�ü�\26_18.png
++C:\Users\sy\Desktop\image_�ü�\26_19.png
++C:\Users\sy\Desktop\image_�ü�\26_2.png
++C:\Users\sy\Desktop\image_�ü�\26_20.png
++C:\Users\sy\Desktop\image_�ü�\26_3.png
++C:\Users\sy\Desktop\image_�ü�\26_4.png
++C:\Users\sy\Desktop\image_�ü�\26_5.png
++C:\Users\sy\Desktop\image_�ü�\26_6.png
++C:\Users\sy\Desktop\image_�ü�\26_7.png
++C:\Users\sy\Desktop\image_�ü�\26_8.png
++C:\Users\sy\Desktop\image_�ü�\26_9.png
++C:\Users\sy\Desktop\image_�ü�\27_1.png
++C:\Users\sy\Desktop\image_�ü�\27_10.png
++C:\Users\sy\Desktop\image_�ü�\27_11.png
++C:\Users\sy\Desktop\image_�ü�\27_12.png
++C:\Users\sy\Desktop\image_�ü�\27_13.png
++C:\Users\sy\Desktop\image_�ü�\27_14.png
++C:\Users\sy\Desktop\image_�ü�\27_15.png
++C:\Users\sy\Desktop\image_�ü�\27_16.png
++C:\Users\sy\Desktop\image_�ü�\27_17.png
++C:\Users\sy\Desktop\image_�ü�\27_18.png
++C:\Users\sy\Desktop\image_�ü�\27_19.png
++C:\Users\sy\Desktop\image_�ü�\27_2.png
++C:\Users\sy\Desktop\image_�ü�\27_20.png
++C:\Users\sy\Desktop\image_�ü�\27_3.png
++C:\Users\sy\Desktop\image_�ü�\27_4.png
++C:\Users\sy\Desktop\image_�ü�\27_5.png
++C:\Users\sy\Desktop\image_�ü�\27_6.png
++C:\Users\sy\Desktop\image_�ü�\27_7.png
++C:\Users\sy\Desktop\image_�ü�\27_8.png
++C:\Users\sy\Desktop\image_�ü�\27_9.png
++C:\Users\sy\Desktop\image_�ü�\28_1.png
++C:\Users\sy\Desktop\image_�ü�\28_10.png
++C:\Users\sy\Desktop\image_�ü�\28_11.png
++C:\Users\sy\Desktop\image_�ü�\28_12.png
++C:\Users\sy\Desktop\image_�ü�\28_13.png
++C:\Users\sy\Desktop\image_�ü�\28_14.png
++C:\Users\sy\Desktop\image_�ü�\28_15.png
++C:\Users\sy\Desktop\image_�ü�\28_16.png
++C:\Users\sy\Desktop\image_�ü�\28_17.png
++C:\Users\sy\Desktop\image_�ü�\28_18.png
++C:\Users\sy\Desktop\image_�ü�\28_19.png
++C:\Users\sy\Desktop\image_�ü�\28_2.png
++C:\Users\sy\Desktop\image_�ü�\28_20.png
++C:\Users\sy\Desktop\image_�ü�\28_3.png
++C:\Users\sy\Desktop\image_�ü�\28_4.png
++C:\Users\sy\Desktop\image_�ü�\28_5.png
++C:\Users\sy\Desktop\image_�ü�\28_6.png
++C:\Users\sy\Desktop\image_�ü�\28_7.png
++C:\Users\sy\Desktop\image_�ü�\28_8.png
++C:\Users\sy\Desktop\image_�ü�\28_9.png
++C:\Users\sy\Desktop\image_�ü�\32_1.png
++C:\Users\sy\Desktop\image_�ü�\32_10.png
++C:\Users\sy\Desktop\image_�ü�\32_11.png
++C:\Users\sy\Desktop\image_�ü�\32_12.png
++C:\Users\sy\Desktop\image_�ü�\32_13.png
++C:\Users\sy\Desktop\image_�ü�\32_14.png
++C:\Users\sy\Desktop\image_�ü�\32_15.png
++C:\Users\sy\Desktop\image_�ü�\32_16.png
++C:\Users\sy\Desktop\image_�ü�\32_17.png
++C:\Users\sy\Desktop\image_�ü�\32_18.png
++C:\Users\sy\Desktop\image_�ü�\32_19.png
++C:\Users\sy\Desktop\image_�ü�\32_2.png
++C:\Users\sy\Desktop\image_�ü�\32_20.png
++C:\Users\sy\Desktop\image_�ü�\32_3.png
++C:\Users\sy\Desktop\image_�ü�\32_4.png
++C:\Users\sy\Desktop\image_�ü�\32_5.png
++C:\Users\sy\Desktop\image_�ü�\32_6.png
++C:\Users\sy\Desktop\image_�ü�\32_7.png
++C:\Users\sy\Desktop\image_�ü�\32_8.png
++C:\Users\sy\Desktop\image_�ü�\32_9.png
++C:\Users\sy\Desktop\image_�ü�\33_1.png
++C:\Users\sy\Desktop\image_�ü�\33_10.png
++C:\Users\sy\Desktop\image_�ü�\33_11.png
++C:\Users\sy\Desktop\image_�ü�\33_12.png
++C:\Users\sy\Desktop\image_�ü�\33_13.png
++C:\Users\sy\Desktop\image_�ü�\33_14.png
++C:\Users\sy\Desktop\image_�ü�\33_15.png
++C:\Users\sy\Desktop\image_�ü�\33_16.png
++C:\Users\sy\Desktop\image_�ü�\33_17.png
++C:\Users\sy\Desktop\image_�ü�\33_18.png
++C:\Users\sy\Desktop\image_�ü�\33_19.png
++C:\Users\sy\Desktop\image_�ü�\33_2.png
++C:\Users\sy\Desktop\image_�ü�\33_20.png
++C:\Users\sy\Desktop\image_�ü�\33_3.png
++C:\Users\sy\Desktop\image_�ü�\33_4.png
++C:\Users\sy\Desktop\image_�ü�\33_5.png
++C:\Users\sy\Desktop\image_�ü�\33_6.png
++C:\Users\sy\Desktop\image_�ü�\33_7.png
++C:\Users\sy\Desktop\image_�ü�\33_8.png
++C:\Users\sy\Desktop\image_�ü�\33_9.png
++C:\Users\sy\Desktop\image_�ü�\34_1.png
++C:\Users\sy\Desktop\image_�ü�\34_10.png
++C:\Users\sy\Desktop\image_�ü�\34_11.png
++C:\Users\sy\Desktop\image_�ü�\34_12.png
++C:\Users\sy\Desktop\image_�ü�\34_13.png
++C:\Users\sy\Desktop\image_�ü�\34_14.png
++C:\Users\sy\Desktop\image_�ü�\34_15.png
++C:\Users\sy\Desktop\image_�ü�\34_16.png
++C:\Users\sy\Desktop\image_�ü�\34_17.png
++C:\Users\sy\Desktop\image_�ü�\34_18.png
++C:\Users\sy\Desktop\image_�ü�\34_19.png
++C:\Users\sy\Desktop\image_�ü�\34_2.png
++C:\Users\sy\Desktop\image_�ü�\34_20.png
++C:\Users\sy\Desktop\image_�ü�\34_3.png
++C:\Users\sy\Desktop\image_�ü�\34_4.png
++C:\Users\sy\Desktop\image_�ü�\34_5.png
++C:\Users\sy\Desktop\image_�ü�\34_6.png
++C:\Users\sy\Desktop\image_�ü�\34_7.png
++C:\Users\sy\Desktop\image_�ü�\34_8.png
++C:\Users\sy\Desktop\image_�ü�\34_9.png
++C:\Users\sy\Desktop\image_�ü�\35_1.png
++C:\Users\sy\Desktop\image_�ü�\35_10.png
++C:\Users\sy\Desktop\image_�ü�\35_11.png
++C:\Users\sy\Desktop\image_�ü�\35_12.png
++C:\Users\sy\Desktop\image_�ü�\35_13.png
++C:\Users\sy\Desktop\image_�ü�\35_14.png
++C:\Users\sy\Desktop\image_�ü�\35_15.png
++C:\Users\sy\Desktop\image_�ü�\35_16.png
++C:\Users\sy\Desktop\image_�ü�\35_17.png
++C:\Users\sy\Desktop\image_�ü�\35_18.png
++C:\Users\sy\Desktop\image_�ü�\35_19.png
++C:\Users\sy\Desktop\image_�ü�\35_2.png
++C:\Users\sy\Desktop\image_�ü�\35_20.png
++C:\Users\sy\Desktop\image_�ü�\35_3.png
++C:\Users\sy\Desktop\image_�ü�\35_4.png
++C:\Users\sy\Desktop\image_�ü�\35_5.png
++C:\Users\sy\Desktop\image_�ü�\35_6.png
++C:\Users\sy\Desktop\image_�ü�\35_7.png
++C:\Users\sy\Desktop\image_�ü�\35_8.png
++C:\Users\sy\Desktop\image_�ü�\35_9.png
++C:\Users\sy\Desktop\image_�ü�\36_1.png
++C:\Users\sy\Desktop\image_�ü�\36_10.png
++C:\Users\sy\Desktop\image_�ü�\36_11.png
++C:\Users\sy\Desktop\image_�ü�\36_12.png
++C:\Users\sy\Desktop\image_�ü�\36_13.png
++C:\Users\sy\Desktop\image_�ü�\36_14.png
++C:\Users\sy\Desktop\image_�ü�\36_15.png
++C:\Users\sy\Desktop\image_�ü�\36_16.png
++C:\Users\sy\Desktop\image_�ü�\36_17.png
++C:\Users\sy\Desktop\image_�ü�\36_18.png
++C:\Users\sy\Desktop\image_�ü�\36_19.png
++C:\Users\sy\Desktop\image_�ü�\36_2.png
++C:\Users\sy\Desktop\image_�ü�\36_20.png
++C:\Users\sy\Desktop\image_�ü�\36_3.png
++C:\Users\sy\Desktop\image_�ü�\36_4.png
++C:\Users\sy\Desktop\image_�ü�\36_5.png
++C:\Users\sy\Desktop\image_�ü�\36_6.png
++C:\Users\sy\Desktop\image_�ü�\36_7.png
++C:\Users\sy\Desktop\image_�ü�\36_8.png
++C:\Users\sy\Desktop\image_�ü�\36_9.png
++C:\Users\sy\Desktop\image_�ü�\39_1.png
++C:\Users\sy\Desktop\image_�ü�\39_10.png
++C:\Users\sy\Desktop\image_�ü�\39_11.png
++C:\Users\sy\Desktop\image_�ü�\39_12.png
++C:\Users\sy\Desktop\image_�ü�\39_13.png
++C:\Users\sy\Desktop\image_�ü�\39_14.png
++C:\Users\sy\Desktop\image_�ü�\39_15.png
++C:\Users\sy\Desktop\image_�ü�\39_16.png
++C:\Users\sy\Desktop\image_�ü�\39_17.png
++C:\Users\sy\Desktop\image_�ü�\39_18.png
++C:\Users\sy\Desktop\image_�ü�\39_19.png
++C:\Users\sy\Desktop\image_�ü�\39_2.png
++C:\Users\sy\Desktop\image_�ü�\39_20.png
++C:\Users\sy\Desktop\image_�ü�\39_3.png
++C:\Users\sy\Desktop\image_�ü�\39_4.png
++C:\Users\sy\Desktop\image_�ü�\39_5.png
++C:\Users\sy\Desktop\image_�ü�\39_6.png
++C:\Users\sy\Desktop\image_�ü�\39_7.png
++C:\Users\sy\Desktop\image_�ü�\39_8.png
++C:\Users\sy\Desktop\image_�ü�\39_9.png
++C:\Users\sy\Desktop\image_�ü�\40_1.png
++C:\Users\sy\Desktop\image_�ü�\40_10.png
++C:\Users\sy\Desktop\image_�ü�\40_11.png
++C:\Users\sy\Desktop\image_�ü�\40_12.png
++C:\Users\sy\Desktop\image_�ü�\40_13.png
++C:\Users\sy\Desktop\image_�ü�\40_15.png
++C:\Users\sy\Desktop\image_�ü�\40_16.png
++C:\Users\sy\Desktop\image_�ü�\40_17.png
++C:\Users\sy\Desktop\image_�ü�\40_18.png
++C:\Users\sy\Desktop\image_�ü�\40_19.png
++C:\Users\sy\Desktop\image_�ü�\40_2.png
++C:\Users\sy\Desktop\image_�ü�\40_20.png
++C:\Users\sy\Desktop\image_�ü�\40_3.png
++C:\Users\sy\Desktop\image_�ü�\40_4.png
++C:\Users\sy\Desktop\image_�ü�\40_5.png
++C:\Users\sy\Desktop\image_�ü�\40_6.png
++C:\Users\sy\Desktop\image_�ü�\40_7.png
++C:\Users\sy\Desktop\image_�ü�\40_8.png
++C:\Users\sy\Desktop\image_�ü�\40_9.png
++C:\Users\sy\Desktop\image_�ü�\41_1.png
++C:\Users\sy\Desktop\image_�ü�\41_10.png
++C:\Users\sy\Desktop\image_�ü�\41_11.png
++C:\Users\sy\Desktop\image_�ü�\41_12.png
++C:\Users\sy\Desktop\image_�ü�\41_13.png
++C:\Users\sy\Desktop\image_�ü�\41_14.png
++C:\Users\sy\Desktop\image_�ü�\41_15.png
++C:\Users\sy\Desktop\image_�ü�\41_16.png
++C:\Users\sy\Desktop\image_�ü�\41_17.png
++C:\Users\sy\Desktop\image_�ü�\41_18.png
++C:\Users\sy\Desktop\image_�ü�\41_19.png
++C:\Users\sy\Desktop\image_�ü�\41_2.png
++C:\Users\sy\Desktop\image_�ü�\41_20.png
++C:\Users\sy\Desktop\image_�ü�\41_3.png
++C:\Users\sy\Desktop\image_�ü�\41_4.png
++C:\Users\sy\Desktop\image_�ü�\41_5.png
++C:\Users\sy\Desktop\image_�ü�\41_6.png
++C:\Users\sy\Desktop\image_�ü�\41_7.png
++C:\Users\sy\Desktop\image_�ü�\41_8.png
++C:\Users\sy\Desktop\image_�ü�\41_9.png
++C:\Users\sy\Desktop\image_�ü�\42_1.png
++C:\Users\sy\Desktop\image_�ü�\42_10.png
++C:\Users\sy\Desktop\image_�ü�\42_11.png
++C:\Users\sy\Desktop\image_�ü�\42_12.png
++C:\Users\sy\Desktop\image_�ü�\42_13.png
++C:\Users\sy\Desktop\image_�ü�\42_14.png
++C:\Users\sy\Desktop\image_�ü�\42_15.png
++C:\Users\sy\Desktop\image_�ü�\42_16.png
++C:\Users\sy\Desktop\image_�ü�\42_17.png
++C:\Users\sy\Desktop\image_�ü�\42_18.png
++C:\Users\sy\Desktop\image_�ü�\42_19.png
++C:\Users\sy\Desktop\image_�ü�\42_20.png
++C:\Users\sy\Desktop\image_�ü�\42_3.png
++C:\Users\sy\Desktop\image_�ü�\42_4.png
++C:\Users\sy\Desktop\image_�ü�\42_5.png
++C:\Users\sy\Desktop\image_�ü�\42_6.png
++C:\Users\sy\Desktop\image_�ü�\42_7.png
++C:\Users\sy\Desktop\image_�ü�\42_8.png
++C:\Users\sy\Desktop\image_�ü�\42_9.png
++C:\Users\sy\Desktop\image_�ü�\43_1.png
++C:\Users\sy\Desktop\image_�ü�\43_10.png
++C:\Users\sy\Desktop\image_�ü�\43_11.png
++C:\Users\sy\Desktop\image_�ü�\43_12.png
++C:\Users\sy\Desktop\image_�ü�\43_13.png
++C:\Users\sy\Desktop\image_�ü�\43_14.png
++C:\Users\sy\Desktop\image_�ü�\43_15.png
++C:\Users\sy\Desktop\image_�ü�\43_16.png
++C:\Users\sy\Desktop\image_�ü�\43_17.png
++C:\Users\sy\Desktop\image_�ü�\43_18.png
++C:\Users\sy\Desktop\image_�ü�\43_19.png
++C:\Users\sy\Desktop\image_�ü�\43_2.png
++C:\Users\sy\Desktop\image_�ü�\43_20.png
++C:\Users\sy\Desktop\image_�ü�\43_3.png
++C:\Users\sy\Desktop\image_�ü�\43_4.png
++C:\Users\sy\Desktop\image_�ü�\43_5.png
++C:\Users\sy\Desktop\image_�ü�\43_6.png
++C:\Users\sy\Desktop\image_�ü�\43_7.png
++C:\Users\sy\Desktop\image_�ü�\43_8.png
++C:\Users\sy\Desktop\image_�ü�\43_9.png
++C:\Users\sy\Desktop\image_�ü�\44_1.png
++C:\Users\sy\Desktop\image_�ü�\44_10.png
++C:\Users\sy\Desktop\image_�ü�\44_11.png
++C:\Users\sy\Desktop\image_�ü�\44_12.png
++C:\Users\sy\Desktop\image_�ü�\44_13.png
++C:\Users\sy\Desktop\image_�ü�\44_14.png
++C:\Users\sy\Desktop\image_�ü�\44_15.png
++C:\Users\sy\Desktop\image_�ü�\44_16.png
++C:\Users\sy\Desktop\image_�ü�\44_17.png
++C:\Users\sy\Desktop\image_�ü�\44_18.png
++C:\Users\sy\Desktop\image_�ü�\44_19.png
++C:\Users\sy\Desktop\image_�ü�\44_2.png
++C:\Users\sy\Desktop\image_�ü�\44_20.png
++C:\Users\sy\Desktop\image_�ü�\44_3.png
++C:\Users\sy\Desktop\image_�ü�\44_4.png
++C:\Users\sy\Desktop\image_�ü�\44_5.png
++C:\Users\sy\Desktop\image_�ü�\44_6.png
++C:\Users\sy\Desktop\image_�ü�\44_7.png
++C:\Users\sy\Desktop\image_�ü�\44_8.png
++C:\Users\sy\Desktop\image_�ü�\44_9.png
++C:\Users\sy\Desktop\image_�ü�\45_1.png
++C:\Users\sy\Desktop\image_�ü�\45_10.png
++C:\Users\sy\Desktop\image_�ü�\45_11.png
++C:\Users\sy\Desktop\image_�ü�\45_12.png
++C:\Users\sy\Desktop\image_�ü�\45_13.png
++C:\Users\sy\Desktop\image_�ü�\45_14.png
++C:\Users\sy\Desktop\image_�ü�\45_15.png
++C:\Users\sy\Desktop\image_�ü�\45_16.png
++C:\Users\sy\Desktop\image_�ü�\45_17.png
++C:\Users\sy\Desktop\image_�ü�\45_18.png
++C:\Users\sy\Desktop\image_�ü�\45_20.png
++C:\Users\sy\Desktop\image_�ü�\45_3.png
++C:\Users\sy\Desktop\image_�ü�\45_4.png
++C:\Users\sy\Desktop\image_�ü�\45_5.png
++C:\Users\sy\Desktop\image_�ü�\45_6.png
++C:\Users\sy\Desktop\image_�ü�\45_7.png
++C:\Users\sy\Desktop\image_�ü�\45_8.png
++C:\Users\sy\Desktop\image_�ü�\45_9.png
++C:\Users\sy\Desktop\image_�ü�\46_1.png
++C:\Users\sy\Desktop\image_�ü�\46_10.png
++C:\Users\sy\Desktop\image_�ü�\46_11.png
++C:\Users\sy\Desktop\image_�ü�\46_12.png
++C:\Users\sy\Desktop\image_�ü�\46_13.png
++C:\Users\sy\Desktop\image_�ü�\46_14.png
++C:\Users\sy\Desktop\image_�ü�\46_15.png
++C:\Users\sy\Desktop\image_�ü�\46_16.png
++C:\Users\sy\Desktop\image_�ü�\46_17.png
++C:\Users\sy\Desktop\image_�ü�\46_18.png
++C:\Users\sy\Desktop\image_�ü�\46_19.png
++C:\Users\sy\Desktop\image_�ü�\46_2.png
++C:\Users\sy\Desktop\image_�ü�\46_20.png
++C:\Users\sy\Desktop\image_�ü�\46_3.png
++C:\Users\sy\Desktop\image_�ü�\46_4.png
++C:\Users\sy\Desktop\image_�ü�\46_5.png
++C:\Users\sy\Desktop\image_�ü�\46_6.png
++C:\Users\sy\Desktop\image_�ü�\46_7.png
++C:\Users\sy\Desktop\image_�ü�\46_8.png
++C:\Users\sy\Desktop\image_�ü�\46_9.png
++C:\Users\sy\Desktop\image_�ü�\51_1.png
++C:\Users\sy\Desktop\image_�ü�\51_10.png
++C:\Users\sy\Desktop\image_�ü�\51_11.png
++C:\Users\sy\Desktop\image_�ü�\51_12.png
++C:\Users\sy\Desktop\image_�ü�\51_13.png
++C:\Users\sy\Desktop\image_�ü�\51_14.png
++C:\Users\sy\Desktop\image_�ü�\51_15.png
++C:\Users\sy\Desktop\image_�ü�\51_16.png
++C:\Users\sy\Desktop\image_�ü�\51_17.png
++C:\Users\sy\Desktop\image_�ü�\51_18.png
++C:\Users\sy\Desktop\image_�ü�\51_19.png
++C:\Users\sy\Desktop\image_�ü�\51_2.png
++C:\Users\sy\Desktop\image_�ü�\51_20.png
++C:\Users\sy\Desktop\image_�ü�\51_3.png
++C:\Users\sy\Desktop\image_�ü�\51_4.png
++C:\Users\sy\Desktop\image_�ü�\51_5.png
++C:\Users\sy\Desktop\image_�ü�\51_6.png
++C:\Users\sy\Desktop\image_�ü�\51_7.png
++C:\Users\sy\Desktop\image_�ü�\51_8.png
++C:\Users\sy\Desktop\image_�ü�\51_9.png
++C:\Users\sy\Desktop\image_�ü�\53_1.png
++C:\Users\sy\Desktop\image_�ü�\53_10.png
++C:\Users\sy\Desktop\image_�ü�\53_11.png
++C:\Users\sy\Desktop\image_�ü�\53_12.png
++C:\Users\sy\Desktop\image_�ü�\53_13.png
++C:\Users\sy\Desktop\image_�ü�\53_14.png
++C:\Users\sy\Desktop\image_�ü�\53_15.png
++C:\Users\sy\Desktop\image_�ü�\53_16.png
++C:\Users\sy\Desktop\image_�ü�\53_17.png
++C:\Users\sy\Desktop\image_�ü�\53_18.png
++C:\Users\sy\Desktop\image_�ü�\53_19.png
++C:\Users\sy\Desktop\image_�ü�\53_2.png
++C:\Users\sy\Desktop\image_�ü�\53_20.png
++C:\Users\sy\Desktop\image_�ü�\53_3.png
++C:\Users\sy\Desktop\image_�ü�\53_4.png
++C:\Users\sy\Desktop\image_�ü�\53_5.png
++C:\Users\sy\Desktop\image_�ü�\53_6.png
++C:\Users\sy\Desktop\image_�ü�\53_7.png
++C:\Users\sy\Desktop\image_�ü�\53_8.png
++C:\Users\sy\Desktop\image_�ü�\53_9.png
++C:\Users\sy\Desktop\image_�ü�\57_1.png
++C:\Users\sy\Desktop\image_�ü�\57_10.png
++C:\Users\sy\Desktop\image_�ü�\57_11.png
++C:\Users\sy\Desktop\image_�ü�\57_12.png
++C:\Users\sy\Desktop\image_�ü�\57_13.png
++C:\Users\sy\Desktop\image_�ü�\57_14.png
++C:\Users\sy\Desktop\image_�ü�\57_15.png
++C:\Users\sy\Desktop\image_�ü�\57_16.png
++C:\Users\sy\Desktop\image_�ü�\57_17.png
++C:\Users\sy\Desktop\image_�ü�\57_18.png
++C:\Users\sy\Desktop\image_�ü�\57_19.png
++C:\Users\sy\Desktop\image_�ü�\57_2.png
++C:\Users\sy\Desktop\image_�ü�\57_20.png
++C:\Users\sy\Desktop\image_�ü�\57_3.png
++C:\Users\sy\Desktop\image_�ü�\57_4.png
++C:\Users\sy\Desktop\image_�ü�\57_5.png
++C:\Users\sy\Desktop\image_�ü�\57_6.png
++C:\Users\sy\Desktop\image_�ü�\57_7.png
++C:\Users\sy\Desktop\image_�ü�\57_8.png
++C:\Users\sy\Desktop\image_�ü�\57_9.png
++C:\Users\sy\Desktop\image_�ü�\60_1.png
++C:\Users\sy\Desktop\image_�ü�\60_10.png
++C:\Users\sy\Desktop\image_�ü�\60_11.png
++C:\Users\sy\Desktop\image_�ü�\60_12.png
++C:\Users\sy\Desktop\image_�ü�\60_13.png
++C:\Users\sy\Desktop\image_�ü�\60_14.png
++C:\Users\sy\Desktop\image_�ü�\60_15.png
++C:\Users\sy\Desktop\image_�ü�\60_16.png
++C:\Users\sy\Desktop\image_�ü�\60_17.png
++C:\Users\sy\Desktop\image_�ü�\60_18.png
++C:\Users\sy\Desktop\image_�ü�\60_19.png
++C:\Users\sy\Desktop\image_�ü�\60_2.png
++C:\Users\sy\Desktop\image_�ü�\60_20.png
++C:\Users\sy\Desktop\image_�ü�\60_3.png
++C:\Users\sy\Desktop\image_�ü�\60_4.png
++C:\Users\sy\Desktop\image_�ü�\60_5.png
++C:\Users\sy\Desktop\image_�ü�\60_6.png
++C:\Users\sy\Desktop\image_�ü�\60_7.png
++C:\Users\sy\Desktop\image_�ü�\60_8.png
++C:\Users\sy\Desktop\image_�ü�\60_9.png
++C:\Users\sy\Desktop\image_�ü�\62_1.png
++C:\Users\sy\Desktop\image_�ü�\62_10.png
++C:\Users\sy\Desktop\image_�ü�\62_11.png
++C:\Users\sy\Desktop\image_�ü�\62_12.png
++C:\Users\sy\Desktop\image_�ü�\62_13.png
++C:\Users\sy\Desktop\image_�ü�\62_14.png
++C:\Users\sy\Desktop\image_�ü�\62_15.png
++C:\Users\sy\Desktop\image_�ü�\62_16.png
++C:\Users\sy\Desktop\image_�ü�\62_17.png
++C:\Users\sy\Desktop\image_�ü�\62_18.png
++C:\Users\sy\Desktop\image_�ü�\62_19.png
++C:\Users\sy\Desktop\image_�ü�\62_2.png
++C:\Users\sy\Desktop\image_�ü�\62_20.png
++C:\Users\sy\Desktop\image_�ü�\62_3.png
++C:\Users\sy\Desktop\image_�ü�\62_4.png
++C:\Users\sy\Desktop\image_�ü�\62_5.png
++C:\Users\sy\Desktop\image_�ü�\62_6.png
++C:\Users\sy\Desktop\image_�ü�\62_7.png
++C:\Users\sy\Desktop\image_�ü�\62_8.png
++C:\Users\sy\Desktop\image_�ü�\62_9.png
++C:\Users\sy\Desktop\image_�ü�\65_1.png
++C:\Users\sy\Desktop\image_�ü�\65_10.png
++C:\Users\sy\Desktop\image_�ü�\65_12.png
++C:\Users\sy\Desktop\image_�ü�\65_13.png
++C:\Users\sy\Desktop\image_�ü�\65_14.png
++C:\Users\sy\Desktop\image_�ü�\65_15.png
++C:\Users\sy\Desktop\image_�ü�\65_16.png
++C:\Users\sy\Desktop\image_�ü�\65_17.png
++C:\Users\sy\Desktop\image_�ü�\65_18.png
++C:\Users\sy\Desktop\image_�ü�\65_19.png
++C:\Users\sy\Desktop\image_�ü�\65_2.png
++C:\Users\sy\Desktop\image_�ü�\65_20.png
++C:\Users\sy\Desktop\image_�ü�\65_3.png
++C:\Users\sy\Desktop\image_�ü�\65_4.png
++C:\Users\sy\Desktop\image_�ü�\65_5.png
++C:\Users\sy\Desktop\image_�ü�\65_6.png
++C:\Users\sy\Desktop\image_�ü�\65_7.png
++C:\Users\sy\Desktop\image_�ü�\65_8.png
++C:\Users\sy\Desktop\image_�ü�\65_9.png
++C:\Users\sy\Desktop\image_�ü�\67_1.png
++C:\Users\sy\Desktop\image_�ü�\67_10.png
++C:\Users\sy\Desktop\image_�ü�\67_11.png
++C:\Users\sy\Desktop\image_�ü�\67_12.png
++C:\Users\sy\Desktop\image_�ü�\67_13.png
++C:\Users\sy\Desktop\image_�ü�\67_14.png
++C:\Users\sy\Desktop\image_�ü�\67_15.png
++C:\Users\sy\Desktop\image_�ü�\67_16.png
++C:\Users\sy\Desktop\image_�ü�\67_17.png
++C:\Users\sy\Desktop\image_�ü�\67_18.png
++C:\Users\sy\Desktop\image_�ü�\67_19.png
++C:\Users\sy\Desktop\image_�ü�\67_2.png
++C:\Users\sy\Desktop\image_�ü�\67_20.png
++C:\Users\sy\Desktop\image_�ü�\67_3.png
++C:\Users\sy\Desktop\image_�ü�\67_4.png
++C:\Users\sy\Desktop\image_�ü�\67_5.png
++C:\Users\sy\Desktop\image_�ü�\67_6.png
++C:\Users\sy\Desktop\image_�ü�\67_7.png
++C:\Users\sy\Desktop\image_�ü�\67_8.png
++C:\Users\sy\Desktop\image_�ü�\67_9.png
++C:\Users\sy\Desktop\image_�ü�\68_1.png
++C:\Users\sy\Desktop\image_�ü�\68_10.png
++C:\Users\sy\Desktop\image_�ü�\68_11.png
++C:\Users\sy\Desktop\image_�ü�\68_12.png
++C:\Users\sy\Desktop\image_�ü�\68_13.png
++C:\Users\sy\Desktop\image_�ü�\68_14.png
++C:\Users\sy\Desktop\image_�ü�\68_15.png
++C:\Users\sy\Desktop\image_�ü�\68_16.png
++C:\Users\sy\Desktop\image_�ü�\68_17.png
++C:\Users\sy\Desktop\image_�ü�\68_18.png
++C:\Users\sy\Desktop\image_�ü�\68_19.png
++C:\Users\sy\Desktop\image_�ü�\68_2.png
++C:\Users\sy\Desktop\image_�ü�\68_20.png
++C:\Users\sy\Desktop\image_�ü�\68_3.png
++C:\Users\sy\Desktop\image_�ü�\68_4.png
++C:\Users\sy\Desktop\image_�ü�\68_5.png
++C:\Users\sy\Desktop\image_�ü�\68_6.png
++C:\Users\sy\Desktop\image_�ü�\68_7.png
++C:\Users\sy\Desktop\image_�ü�\68_8.png
++C:\Users\sy\Desktop\image_�ü�\68_9.png
++C:\Users\sy\Desktop\image_�ü�\70_1.png
++C:\Users\sy\Desktop\image_�ü�\70_10.png
++C:\Users\sy\Desktop\image_�ü�\70_11.png
++C:\Users\sy\Desktop\image_�ü�\70_12.png
++C:\Users\sy\Desktop\image_�ü�\70_13.png
++C:\Users\sy\Desktop\image_�ü�\70_14.png
++C:\Users\sy\Desktop\image_�ü�\70_15.png
++C:\Users\sy\Desktop\image_�ü�\70_16.png
++C:\Users\sy\Desktop\image_�ü�\70_17.png
++C:\Users\sy\Desktop\image_�ü�\70_18.png
++C:\Users\sy\Desktop\image_�ü�\70_19.png
++C:\Users\sy\Desktop\image_�ü�\70_2.png
++C:\Users\sy\Desktop\image_�ü�\70_20.png
++C:\Users\sy\Desktop\image_�ü�\70_3.png
++C:\Users\sy\Desktop\image_�ü�\70_4.png
++C:\Users\sy\Desktop\image_�ü�\70_5.png
++C:\Users\sy\Desktop\image_�ü�\70_6.png
++C:\Users\sy\Desktop\image_�ü�\70_7.png
++C:\Users\sy\Desktop\image_�ü�\70_8.png
++C:\Users\sy\Desktop\image_�ü�\70_9.png
++C:\Users\sy\Desktop\image_�ü�\72_1.png
++C:\Users\sy\Desktop\image_�ü�\72_10.png
++C:\Users\sy\Desktop\image_�ü�\72_11.png
++C:\Users\sy\Desktop\image_�ü�\72_12.png
++C:\Users\sy\Desktop\image_�ü�\72_13.png
++C:\Users\sy\Desktop\image_�ü�\72_14.png
++C:\Users\sy\Desktop\image_�ü�\72_15.png
++C:\Users\sy\Desktop\image_�ü�\72_16.png
++C:\Users\sy\Desktop\image_�ü�\72_17.png
++C:\Users\sy\Desktop\image_�ü�\72_18.png
++C:\Users\sy\Desktop\image_�ü�\72_19.png
++C:\Users\sy\Desktop\image_�ü�\72_2.png
++C:\Users\sy\Desktop\image_�ü�\72_20.png
++C:\Users\sy\Desktop\image_�ü�\72_3.png
++C:\Users\sy\Desktop\image_�ü�\72_4.png
++C:\Users\sy\Desktop\image_�ü�\72_5.png
++C:\Users\sy\Desktop\image_�ü�\72_6.png
++C:\Users\sy\Desktop\image_�ü�\72_7.png
++C:\Users\sy\Desktop\image_�ü�\72_8.png
++C:\Users\sy\Desktop\image_�ü�\72_9.png
++C:\Users\sy\Desktop\image_�ü�\73_1.png
++C:\Users\sy\Desktop\image_�ü�\73_10.png
++C:\Users\sy\Desktop\image_�ü�\73_11.png
++C:\Users\sy\Desktop\image_�ü�\73_12.png
++C:\Users\sy\Desktop\image_�ü�\73_13.png
++C:\Users\sy\Desktop\image_�ü�\73_14.png
++C:\Users\sy\Desktop\image_�ü�\73_15.png
++C:\Users\sy\Desktop\image_�ü�\73_16.png
++C:\Users\sy\Desktop\image_�ü�\73_17.png
++C:\Users\sy\Desktop\image_�ü�\73_18.png
++C:\Users\sy\Desktop\image_�ü�\73_19.png
++C:\Users\sy\Desktop\image_�ü�\73_2.png
++C:\Users\sy\Desktop\image_�ü�\73_20.png
++C:\Users\sy\Desktop\image_�ü�\73_3.png
++C:\Users\sy\Desktop\image_�ü�\73_4.png
++C:\Users\sy\Desktop\image_�ü�\73_5.png
++C:\Users\sy\Desktop\image_�ü�\73_6.png
++C:\Users\sy\Desktop\image_�ü�\73_7.png
++C:\Users\sy\Desktop\image_�ü�\73_8.png
++C:\Users\sy\Desktop\image_�ü�\73_9.png
++C:\Users\sy\Desktop\image_�ü�\80_1.png
++C:\Users\sy\Desktop\image_�ü�\80_10.png
++C:\Users\sy\Desktop\image_�ü�\80_11.png
++C:\Users\sy\Desktop\image_�ü�\80_12.png
++C:\Users\sy\Desktop\image_�ü�\80_13.png
++C:\Users\sy\Desktop\image_�ü�\80_14.png
++C:\Users\sy\Desktop\image_�ü�\80_15.png
++C:\Users\sy\Desktop\image_�ü�\80_16.png
++C:\Users\sy\Desktop\image_�ü�\80_17.png
++C:\Users\sy\Desktop\image_�ü�\80_18.png
++C:\Users\sy\Desktop\image_�ü�\80_19.png
++C:\Users\sy\Desktop\image_�ü�\80_2.png
++C:\Users\sy\Desktop\image_�ü�\80_20.png
++C:\Users\sy\Desktop\image_�ü�\80_3.png
++C:\Users\sy\Desktop\image_�ü�\80_4.png
++C:\Users\sy\Desktop\image_�ü�\80_5.png
++C:\Users\sy\Desktop\image_�ü�\80_6.png
++C:\Users\sy\Desktop\image_�ü�\80_7.png
++C:\Users\sy\Desktop\image_�ü�\80_8.png
++C:\Users\sy\Desktop\image_�ü�\80_9.png
++C:\Users\sy\Desktop\image_�ü�\81_1.png
++C:\Users\sy\Desktop\image_�ü�\81_10.png
++C:\Users\sy\Desktop\image_�ü�\81_11.png
++C:\Users\sy\Desktop\image_�ü�\81_12.png
++C:\Users\sy\Desktop\image_�ü�\81_13.png
++C:\Users\sy\Desktop\image_�ü�\81_14.png
++C:\Users\sy\Desktop\image_�ü�\81_15.png
++C:\Users\sy\Desktop\image_�ü�\81_16.png
++C:\Users\sy\Desktop\image_�ü�\81_17.png
++C:\Users\sy\Desktop\image_�ü�\81_18.png
++C:\Users\sy\Desktop\image_�ü�\81_19.png
++C:\Users\sy\Desktop\image_�ü�\81_2.png
++C:\Users\sy\Desktop\image_�ü�\81_20.png
++C:\Users\sy\Desktop\image_�ü�\81_3.png
++C:\Users\sy\Desktop\image_�ü�\81_4.png
++C:\Users\sy\Desktop\image_�ü�\81_5.png
++C:\Users\sy\Desktop\image_�ü�\81_6.png
++C:\Users\sy\Desktop\image_�ü�\81_7.png
++C:\Users\sy\Desktop\image_�ü�\81_8.png
++C:\Users\sy\Desktop\image_�ü�\81_9.png
++C:\Users\sy\Desktop\image_�ü�\82_1.png
++C:\Users\sy\Desktop\image_�ü�\82_10.png
++C:\Users\sy\Desktop\image_�ü�\82_11.png
++C:\Users\sy\Desktop\image_�ü�\82_12.png
++C:\Users\sy\Desktop\image_�ü�\82_13.png
++C:\Users\sy\Desktop\image_�ü�\82_14.png
++C:\Users\sy\Desktop\image_�ü�\82_15.png
++C:\Users\sy\Desktop\image_�ü�\82_16.png
++C:\Users\sy\Desktop\image_�ü�\82_17.png
++C:\Users\sy\Desktop\image_�ü�\82_18.png
++C:\Users\sy\Desktop\image_�ü�\82_19.png
++C:\Users\sy\Desktop\image_�ü�\82_2.png
++C:\Users\sy\Desktop\image_�ü�\82_20.png
++C:\Users\sy\Desktop\image_�ü�\82_3.png
++C:\Users\sy\Desktop\image_�ü�\82_4.png
++C:\Users\sy\Desktop\image_�ü�\82_5.png
++C:\Users\sy\Desktop\image_�ü�\82_6.png
++C:\Users\sy\Desktop\image_�ü�\82_7.png
++C:\Users\sy\Desktop\image_�ü�\82_8.png
++C:\Users\sy\Desktop\image_�ü�\82_9.png
++C:\Users\sy\Desktop\image_�ü�\84_1.png
++C:\Users\sy\Desktop\image_�ü�\84_10.png
++C:\Users\sy\Desktop\image_�ü�\84_11.png
++C:\Users\sy\Desktop\image_�ü�\84_12.png
++C:\Users\sy\Desktop\image_�ü�\84_13.png
++C:\Users\sy\Desktop\image_�ü�\84_14.png
++C:\Users\sy\Desktop\image_�ü�\84_15.png
++C:\Users\sy\Desktop\image_�ü�\84_16.png
++C:\Users\sy\Desktop\image_�ü�\84_17.png
++C:\Users\sy\Desktop\image_�ü�\84_18.png
++C:\Users\sy\Desktop\image_�ü�\84_19.png
++C:\Users\sy\Desktop\image_�ü�\84_2.png
++C:\Users\sy\Desktop\image_�ü�\84_20.png
++C:\Users\sy\Desktop\image_�ü�\84_3.png
++C:\Users\sy\Desktop\image_�ü�\84_4.png
++C:\Users\sy\Desktop\image_�ü�\84_5.png
++C:\Users\sy\Desktop\image_�ü�\84_6.png
++C:\Users\sy\Desktop\image_�ü�\84_7.png
++C:\Users\sy\Desktop\image_�ü�\84_8.png
++C:\Users\sy\Desktop\image_�ü�\84_9.png
++C:\Users\sy\Desktop\image_�ü�\85_1.png
++C:\Users\sy\Desktop\image_�ü�\85_10.png
++C:\Users\sy\Desktop\image_�ü�\85_11.png
++C:\Users\sy\Desktop\image_�ü�\85_12.png
++C:\Users\sy\Desktop\image_�ü�\85_13.png
++C:\Users\sy\Desktop\image_�ü�\85_14.png
++C:\Users\sy\Desktop\image_�ü�\85_15.png
++C:\Users\sy\Desktop\image_�ü�\85_16.png
++C:\Users\sy\Desktop\image_�ü�\85_17.png
++C:\Users\sy\Desktop\image_�ü�\85_18.png
++C:\Users\sy\Desktop\image_�ü�\85_19.png
++C:\Users\sy\Desktop\image_�ü�\85_2.png
++C:\Users\sy\Desktop\image_�ü�\85_20.png
++C:\Users\sy\Desktop\image_�ü�\85_3.png
++C:\Users\sy\Desktop\image_�ü�\85_4.png
++C:\Users\sy\Desktop\image_�ü�\85_5.png
++C:\Users\sy\Desktop\image_�ü�\85_6.png
++C:\Users\sy\Desktop\image_�ü�\85_7.png
++C:\Users\sy\Desktop\image_�ü�\85_8.png
++C:\Users\sy\Desktop\image_�ü�\85_9.png
++C:\Users\sy\Desktop\image_�ü�\86_1.png
++C:\Users\sy\Desktop\image_�ü�\86_10.png
++C:\Users\sy\Desktop\image_�ü�\86_11.png
++C:\Users\sy\Desktop\image_�ü�\86_12.png
++C:\Users\sy\Desktop\image_�ü�\86_13.png
++C:\Users\sy\Desktop\image_�ü�\86_14.png
++C:\Users\sy\Desktop\image_�ü�\86_15.png
++C:\Users\sy\Desktop\image_�ü�\86_16.png
++C:\Users\sy\Desktop\image_�ü�\86_17.png
++C:\Users\sy\Desktop\image_�ü�\86_18.png
++C:\Users\sy\Desktop\image_�ü�\86_19.png
++C:\Users\sy\Desktop\image_�ü�\86_2.png
++C:\Users\sy\Desktop\image_�ü�\86_20.png
++C:\Users\sy\Desktop\image_�ü�\86_3.png
++C:\Users\sy\Desktop\image_�ü�\86_4.png
++C:\Users\sy\Desktop\image_�ü�\86_5.png
++C:\Users\sy\Desktop\image_�ü�\86_6.png
++C:\Users\sy\Desktop\image_�ü�\86_7.png
++C:\Users\sy\Desktop\image_�ü�\86_8.png
++C:\Users\sy\Desktop\image_�ü�\86_9.png
++C:\Users\sy\Desktop\image_�ü�\89_1.png
++C:\Users\sy\Desktop\image_�ü�\89_10.png
++C:\Users\sy\Desktop\image_�ü�\89_11.png
++C:\Users\sy\Desktop\image_�ü�\89_12.png
++C:\Users\sy\Desktop\image_�ü�\89_13.png
++C:\Users\sy\Desktop\image_�ü�\89_14.png
++C:\Users\sy\Desktop\image_�ü�\89_15.png
++C:\Users\sy\Desktop\image_�ü�\89_16.png
++C:\Users\sy\Desktop\image_�ü�\89_17.png
++C:\Users\sy\Desktop\image_�ü�\89_18.png
++C:\Users\sy\Desktop\image_�ü�\89_19.png
++C:\Users\sy\Desktop\image_�ü�\89_2.png
++C:\Users\sy\Desktop\image_�ü�\89_20.png
++C:\Users\sy\Desktop\image_�ü�\89_3.png
++C:\Users\sy\Desktop\image_�ü�\89_4.png
++C:\Users\sy\Desktop\image_�ü�\89_5.png
++C:\Users\sy\Desktop\image_�ü�\89_6.png
++C:\Users\sy\Desktop\image_�ü�\89_7.png
++C:\Users\sy\Desktop\image_�ü�\89_8.png
++C:\Users\sy\Desktop\image_�ü�\89_9.png
++C:\Users\sy\Desktop\image_�ü�\90_1.png
++C:\Users\sy\Desktop\image_�ü�\90_10.png
++C:\Users\sy\Desktop\image_�ü�\90_11.png
++C:\Users\sy\Desktop\image_�ü�\90_12.png
++C:\Users\sy\Desktop\image_�ü�\90_13.png
++C:\Users\sy\Desktop\image_�ü�\90_14.png
++C:\Users\sy\Desktop\image_�ü�\90_15.png
++C:\Users\sy\Desktop\image_�ü�\90_16.png
++C:\Users\sy\Desktop\image_�ü�\90_17.png
++C:\Users\sy\Desktop\image_�ü�\90_18.png
++C:\Users\sy\Desktop\image_�ü�\90_19.png
++C:\Users\sy\Desktop\image_�ü�\90_2.png
++C:\Users\sy\Desktop\image_�ü�\90_20.png
++C:\Users\sy\Desktop\image_�ü�\90_3.png
++C:\Users\sy\Desktop\image_�ü�\90_4.png
++C:\Users\sy\Desktop\image_�ü�\90_5.png
++C:\Users\sy\Desktop\image_�ü�\90_6.png
++C:\Users\sy\Desktop\image_�ü�\90_7.png
++C:\Users\sy\Desktop\image_�ü�\90_8.png
++C:\Users\sy\Desktop\image_�ü�\90_9.png
++C:\Users\sy\Desktop\image_�ü�\92_1.png
++C:\Users\sy\Desktop\image_�ü�\92_10.png
++C:\Users\sy\Desktop\image_�ü�\92_11.png
++C:\Users\sy\Desktop\image_�ü�\92_12.png
++C:\Users\sy\Desktop\image_�ü�\92_13.png
++C:\Users\sy\Desktop\image_�ü�\92_14.png
++C:\Users\sy\Desktop\image_�ü�\92_15.png
++C:\Users\sy\Desktop\image_�ü�\92_16.png
++C:\Users\sy\Desktop\image_�ü�\92_17.png
++C:\Users\sy\Desktop\image_�ü�\92_18.png
++C:\Users\sy\Desktop\image_�ü�\92_19.png
++C:\Users\sy\Desktop\image_�ü�\92_2.png
++C:\Users\sy\Desktop\image_�ü�\92_20.png
++C:\Users\sy\Desktop\image_�ü�\92_3.png
++C:\Users\sy\Desktop\image_�ü�\92_4.png
++C:\Users\sy\Desktop\image_�ü�\92_5.png
++C:\Users\sy\Desktop\image_�ü�\92_6.png
++C:\Users\sy\Desktop\image_�ü�\92_7.png
++C:\Users\sy\Desktop\image_�ü�\92_8.png
++C:\Users\sy\Desktop\image_�ü�\92_9.png
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\1.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\2.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\3.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\4.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\5.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\6.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\7.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\8.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\e30593d19a99a1c3e2718d842f821710_u=1516518317,1014184702&fm=175&app=25&f=JPEG_w=483&h=694&s=4A92EB0DCE236C965CA47CAF0300E080.jpg
++E:\�о���\face\facenet\ ���Գ���\�ü���ͼƬ\mmexport1522080543400.jpg
+diff --git Anthony_Hopkins_0001.jpg Anthony_Hopkins_0001.jpg
+new file mode 100644
+index 0000000000000000000000000000000000000000..3d65e04bf75422233fe20c49c34b3224c4c73dbd
+GIT binary patch
+literal 13219
+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
+am2~>IZw^LEx9y2@2Q}X6O_>t@{rO*LAnr^6
+
+diff --git Anthony_Hopkins_0002.jpg Anthony_Hopkins_0002.jpg
+new file mode 100644
+index 0000000000000000000000000000000000000000..55844e53f701fb045e4c3b0ae44dd29c81c848e4
+GIT binary patch
+literal 13032
+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
+
+diff --git Adrien_Brody_0002.jpg Adrien_Brody_0002.jpg
+new file mode 100644
+index 0000000000000000000000000000000000000000..529b8260da35784de29c0cb190be2aa27e03970e
+GIT binary patch
+literal 6586
+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
+
+diff --git Adrien_Brody_0001.jpg Adrien_Brody_0001.jpg
+new file mode 100644
+index 0000000000000000000000000000000000000000..2524661fd8f5d601d120ebe08d40a3e948e81dd8
+GIT binary patch
+literal 6492
+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
+Q_$x!H3yLDO;cDT(0PiwJ&Hw-a
+
