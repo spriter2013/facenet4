@@ -29,7 +29,7 @@ def mtcnn_cut(fin,fout):
     batch_size = 1000
     image_size = 182
     input_image_size = 160
-
+#qeaeas
     print('Creating networks and loading parameters')
 
     with tf.Graph().as_default():
